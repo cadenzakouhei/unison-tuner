@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison Tuner</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Zen+Kaku+Gothic+New:wght@300;400;700&display=swap');
+
+  :root {
+    --bg: #0a0c0f;
+    --panel: #111318;
+    --border: #1e2330;
+    --accent: #00e5ff;
+    --green: #00ff88;
+    --yellow: #ffdd00;
+    --red: #ff3355;
+    --text: #c8d0e0;
+    --dim: #4a5568;
+    --mono: 'Share Tech Mono', monospace;
+    --sans: 'Zen Kaku Gothic New', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px 40px;
+    overflow-x: hidden;
+  }
+
+  /* scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px);
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  header {
+    width: 100%;
+    max-width: 700px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+  }
+
+  header h1 {
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  header span {
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 0.1em;
+  }
+
+  .main-grid {
+    width: 100%;
+    max-width: 700px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* ── Status bar ── */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  #mic-btn {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 6px 16px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    text-transform: uppercase;
+  }
+  #mic-btn:hover { background: var(--accent); color: var(--bg); }
+  #mic-btn.active { background: var(--red); border-color: var(--red); color: #fff; }
+
+  #status-text {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--dim);
+    flex: 1;
+  }
+
+  /* ── Detected note ── */
+  .note-display {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  .note-name {
+    font-family: var(--mono);
+    font-size: 2.8rem;
+    color: var(--accent);
+    line-height: 1;
+    min-width: 100px;
+  }
+
+  .freq-info {
+    text-align: right;
+  }
+
+  .freq-hz {
+    font-family: var(--mono);
+    font-size: 1.4rem;
+    color: var(--text);
+  }
+
+  .freq-cents {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--dim);
+    margin-top: 4px;
+  }
+
+  /* ── Harmonic selector ── */
+  .harmonic-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    flex-wrap: wrap;
+  }
+
+  .harmonic-row label {
+    font-size: 0.72rem;
+    color: var(--dim);
+    letter-spacing: 0.08em;
+    font-family: var(--mono);
+    white-space: nowrap;
+  }
+
+  .harm-btns {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .harm-btn {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    width: 38px;
+    height: 32px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .harm-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .harm-btn.selected { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+  /* ── Beat meter ── */
+  .beat-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px 18px;
+  }
+
+  .beat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .beat-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  #beat-hz {
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    color: var(--yellow);
+    transition: color 0.3s;
+  }
+  #beat-hz.zero { color: var(--green); }
+
+  /* Beat waveform canvas */
+  #beat-canvas {
+    width: 100%;
+    height: 90px;
+    display: block;
+    border-radius: 2px;
+    background: #0d0f14;
+  }
+
+  /* ── Verdict indicator ── */
+  .verdict {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    transition: border-color 0.4s;
+  }
+
+  .verdict.in-tune { border-color: var(--green); }
+  .verdict.close   { border-color: var(--yellow); }
+  .verdict.out     { border-color: var(--red); }
+
+  .verdict-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background 0.3s, box-shadow 0.3s;
+    flex-shrink: 0;
+  }
+  .verdict.in-tune .verdict-dot { background: var(--green); box-shadow: 0 0 18px var(--green); }
+  .verdict.close   .verdict-dot { background: var(--yellow); box-shadow: 0 0 12px var(--yellow); }
+  .verdict.out     .verdict-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  .verdict-text {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+    transition: color 0.3s;
+  }
+  .verdict.in-tune .verdict-text { color: var(--green); }
+  .verdict.close   .verdict-text { color: var(--yellow); }
+  .verdict.out     .verdict-text { color: var(--red); }
+
+  /* ── FFT spectrum ── */
+  .spectrum-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 18px;
+  }
+
+  .spectrum-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  #spectrum-canvas {
+    width: 100%;
+    height: 80px;
+    display: block;
+    border-radius: 2px;
+    background: #0d0f14;
+  }
+
+  /* ── Peaks list ── */
+  .peaks-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 18px;
+  }
+
+  .peaks-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  #peaks-list {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .peak-chip {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text);
+  }
+  .peak-chip.fundamental { border-color: var(--accent); color: var(--accent); }
+  .peak-chip.selected-harm { border-color: var(--yellow); color: var(--yellow); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Unison Tuner</h1>
+  <span>PIANO · 2-STRING BEAT DETECTOR</span>
+</header>
+
+<div class="main-grid">
+
+  <!-- Status -->
+  <div class="status-bar">
+    <button id="mic-btn">▶ MIC ON</button>
+    <span id="status-text">マイクをオンにして調律を開始</span>
+  </div>
+
+  <!-- Note display -->
+  <div class="note-display">
+    <div class="note-name" id="note-name">—</div>
+    <div class="freq-info">
+      <div class="freq-hz" id="freq-hz">— Hz</div>
+      <div class="freq-cents" id="freq-cents">± — cents</div>
+    </div>
+  </div>
+
+  <!-- Harmonic selector -->
+  <div class="harmonic-row">
+    <label>倍音選択：</label>
+    <div class="harm-btns" id="harm-btns"></div>
+  </div>
+
+  <!-- Beat waveform -->
+  <div class="beat-section">
+    <div class="beat-header">
+      <span class="beat-label">BEAT WAVEFORM</span>
+      <span id="beat-hz">— beat/s</span>
+    </div>
+    <canvas id="beat-canvas"></canvas>
+  </div>
+
+  <!-- Verdict -->
+  <div class="verdict out" id="verdict">
+    <div class="verdict-dot"></div>
+    <span class="verdict-text" id="verdict-text">SIGNAL WAITING...</span>
+  </div>
+
+  <!-- FFT Spectrum -->
+  <div class="spectrum-section">
+    <div class="spectrum-label">FFT SPECTRUM</div>
+    <canvas id="spectrum-canvas"></canvas>
+  </div>
+
+  <!-- Detected peaks -->
+  <div class="peaks-section">
+    <div class="peaks-label">DETECTED PARTIALS</div>
+    <div id="peaks-list"><span style="color:var(--dim);font-family:var(--mono);font-size:0.7rem;">—</span></div>
+  </div>
+
+</div>
+
+<script>
+// ─── Constants ───────────────────────────────────────────────
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const A4_FREQ = 440.0;
+const FFT_SIZE = 8192;
+const SAMPLE_RATE_DEFAULT = 44100;
+
+// ─── State ───────────────────────────────────────────────────
+let audioCtx = null, analyser = null, micStream = null;
+let isRunning = false;
+let selectedHarmonic = 4; // default 4th partial
+let beatHistory = new Float32Array(300).fill(0);
+let amplitudeHistory = new Float32Array(300).fill(0);
+let lastBeatHz = 0;
+let animFrame = null;
+
+// Beat detection state
+let envBuffer = [];
+let lastEnvTime = 0;
+let beatPhase = 0;
+let beatFreqEst = 0;
+
+// ─── UI refs ─────────────────────────────────────────────────
+const micBtn      = document.getElementById('mic-btn');
+const statusText  = document.getElementById('status-text');
+const noteNameEl  = document.getElementById('note-name');
+const freqHzEl    = document.getElementById('freq-hz');
+const freqCentsEl = document.getElementById('freq-cents');
+const beatHzEl    = document.getElementById('beat-hz');
+const verdictEl   = document.getElementById('verdict');
+const verdictText = document.getElementById('verdict-text');
+const peaksList   = document.getElementById('peaks-list');
+
+const beatCanvas = document.getElementById('beat-canvas');
+const beatCtx    = beatCanvas.getContext('2d');
+const specCanvas = document.getElementById('spectrum-canvas');
+const specCtx    = specCanvas.getContext('2d');
+
+// ─── Harmonic buttons ────────────────────────────────────────
+const harmBtns = document.getElementById('harm-btns');
+for (let i = 1; i <= 8; i++) {
+  const b = document.createElement('button');
+  b.className = 'harm-btn' + (i === selectedHarmonic ? ' selected' : '');
+  b.textContent = i === 1 ? '基音' : `${i}倍`;
+  b.dataset.harm = i;
+  b.addEventListener('click', () => {
+    selectedHarmonic = i;
+    document.querySelectorAll('.harm-btn').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+  });
+  harmBtns.appendChild(b);
+}
+
+// ─── Resize canvases ─────────────────────────────────────────
+function resizeCanvases() {
+  beatCanvas.width  = beatCanvas.offsetWidth * devicePixelRatio;
+  beatCanvas.height = beatCanvas.offsetHeight * devicePixelRatio;
+  specCanvas.width  = specCanvas.offsetWidth * devicePixelRatio;
+  specCanvas.height = specCanvas.offsetHeight * devicePixelRatio;
+}
+window.addEventListener('resize', resizeCanvases);
+resizeCanvases();
+
+// ─── Frequency → note ────────────────────────────────────────
+function freqToNote(freq) {
+  if (freq <= 0) return { name: '—', midi: 69, cents: 0 };
+  const midi = 12 * Math.log2(freq / A4_FREQ) + 69;
+  const midiRound = Math.round(midi);
+  const cents = (midi - midiRound) * 100;
+  const octave = Math.floor(midiRound / 12) - 1;
+  const name = NOTE_NAMES[((midiRound % 12) + 12) % 12] + octave;
+  return { name, midi: midiRound, cents };
+}
+
+// ─── FFT peak detection ──────────────────────────────────────
+function detectPeaks(freqData, sampleRate, fftSize, topN = 12) {
+  const binHz = sampleRate / fftSize;
+  const minBin = Math.floor(20 / binHz);
+  const maxBin = Math.floor(8000 / binHz);
+  const peaks = [];
+
+  for (let i = minBin + 2; i < maxBin - 2; i++) {
+    const v = freqData[i];
+    if (v > freqData[i-1] && v > freqData[i-2] &&
+        v > freqData[i+1] && v > freqData[i+2] && v > 80) {
+      // parabolic interpolation for sub-bin accuracy
+      const prev = freqData[i - 1];
+      const next = freqData[i + 1];
+      const denom = 2 * (2 * v - prev - next);
+      const offset = denom !== 0 ? (prev - next) / denom : 0;
+      const freq = (i + offset) * binHz;
+      peaks.push({ freq, amp: v });
+    }
+  }
+
+  peaks.sort((a, b) => b.amp - a.amp);
+  return peaks.slice(0, topN);
+}
+
+// ─── Find fundamental from peaks ────────────────────────────
+function findFundamental(peaks) {
+  if (!peaks.length) return null;
+
+  // Try each peak as potential fundamental
+  let bestFund = null;
+  let bestScore = -1;
+
+  for (const p of peaks.slice(0, 6)) {
+    const f0 = p.freq;
+    if (f0 < 20 || f0 > 4000) continue;
+    let score = p.amp;
+    for (const q of peaks) {
+      const ratio = q.freq / f0;
+      const nearestN = Math.round(ratio);
+      if (nearestN >= 2 && nearestN <= 8) {
+        const err = Math.abs(ratio - nearestN) / nearestN;
+        if (err < 0.02) score += q.amp * 0.5;
+      }
+    }
+    if (score > bestScore) { bestScore = score; bestFund = f0; }
+  }
+  return bestFund;
+}
+
+// ─── Get selected harmonic frequency from peaks ──────────────
+function getHarmonicFreq(peaks, fundamental, harmN) {
+  if (!fundamental) return null;
+  const target = fundamental * harmN;
+  // find closest peak within 3%
+  let best = null, bestErr = 0.03;
+  for (const p of peaks) {
+    const err = Math.abs(p.freq - target) / target;
+    if (err < bestErr) { best = p; bestErr = err; }
+  }
+  return best ? best.freq : target; // fallback to theoretical
+}
+
+// ─── Beat envelope analysis ───────────────────────────────────
+// We compute the RMS amplitude envelope and look for AM modulation (beats)
+let envSamples = [];
+const ENV_WINDOW = 512;
+
+function estimateBeatFromAM(timeDomainData) {
+  // RMS of this frame
+  let rms = 0;
+  for (let i = 0; i < timeDomainData.length; i++) {
+    const s = (timeDomainData[i] - 128) / 128;
+    rms += s * s;
+  }
+  rms = Math.sqrt(rms / timeDomainData.length);
+  envSamples.push(rms);
+  if (envSamples.length > 512) envSamples.shift();
+
+  // Low-pass the envelope
+  const env = envSamples;
+  if (env.length < 64) return 0;
+
+  // Auto-correlate the envelope to find beat period
+  const N = env.length;
+  const mean = env.reduce((a,b) => a+b, 0) / N;
+  const centered = env.map(x => x - mean);
+
+  let bestLag = 0, bestCorr = -1;
+  // search lags corresponding to 0.3 Hz to 20 Hz beats
+  // frame rate ≈ 60fps, so lag in frames
+  const frameRate = 60;
+  const lagMin = Math.floor(frameRate / 20); // 20 beat/s
+  const lagMax = Math.floor(frameRate / 0.3); // 0.3 beat/s
+
+  for (let lag = lagMin; lag <= Math.min(lagMax, N - 1); lag++) {
+    let corr = 0, norm = 0;
+    for (let i = 0; i < N - lag; i++) {
+      corr += centered[i] * centered[i + lag];
+      norm += centered[i] * centered[i];
+    }
+    if (norm > 0) corr /= norm;
+    if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+  }
+
+  if (bestCorr < 0.1 || bestLag === 0) return 0;
+  return frameRate / bestLag;
+}
+
+// Smoother beat estimation using FFT of amplitude envelope
+let ampHistory2 = [];
+function estimateBeatFFT(rmsVal, sampleRate) {
+  ampHistory2.push(rmsVal);
+  if (ampHistory2.length > 2048) ampHistory2.shift();
+  if (ampHistory2.length < 256) return 0;
+
+  // Simple zero-crossing rate on AC component of envelope
+  const N = Math.min(ampHistory2.length, 512);
+  const slice = ampHistory2.slice(-N);
+  const mean = slice.reduce((a,b) => a+b, 0) / N;
+  let crossings = 0;
+  for (let i = 1; i < slice.length; i++) {
+    if ((slice[i] - mean) * (slice[i-1] - mean) < 0) crossings++;
+  }
+  // crossings / 2 = cycles, frameRate = 60
+  const frameRate = 60;
+  const beatHz = (crossings / 2) / (N / frameRate);
+  return beatHz > 0.1 && beatHz < 25 ? beatHz : 0;
+}
+
+// ─── Draw beat waveform ──────────────────────────────────────
+function drawBeatWave(beatHz) {
+  const w = beatCanvas.width, h = beatCanvas.height;
+  beatCtx.clearRect(0, 0, w, h);
+
+  // push new amplitude into history
+  amplitudeHistory.copyWithin(0, 1);
+  amplitudeHistory[amplitudeHistory.length - 1] = beatHz > 0 ? beatHz : 0;
+
+  // color based on beat speed
+  let color;
+  if (beatHz < 0.05)      color = getComputedStyle(document.documentElement).getPropertyValue('--green').trim();
+  else if (beatHz < 1.5)  color = getComputedStyle(document.documentElement).getPropertyValue('--yellow').trim();
+  else                     color = getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
+
+  // draw simulated beat wave using sin modulated by beat frequency
+  beatCtx.strokeStyle = color;
+  beatCtx.lineWidth = 1.5 * devicePixelRatio;
+  beatCtx.shadowBlur = beatHz < 0.05 ? 8 * devicePixelRatio : 0;
+  beatCtx.shadowColor = color;
+  beatCtx.beginPath();
+
+  const now = performance.now() / 1000;
+  const pts = 400;
+  for (let i = 0; i <= pts; i++) {
+    const t = i / pts;
+    const x = t * w;
+    // carrier ~4Hz visual sine, AM modulated by beat envelope
+    const beatAmp = beatHz > 0 ? 1 : 0.15;
+    const beatMod = beatHz > 0
+      ? 0.5 + 0.5 * Math.cos(2 * Math.PI * beatHz * (now + t * 2))
+      : 1.0;
+    const carrier = Math.sin(2 * Math.PI * 4 * (now * 0.5 + t * 3));
+    const y = h / 2 + (h * 0.38) * beatAmp * beatMod * carrier;
+    i === 0 ? beatCtx.moveTo(x, y) : beatCtx.lineTo(x, y);
+  }
+  beatCtx.stroke();
+  beatCtx.shadowBlur = 0;
+}
+
+// ─── Draw FFT spectrum ───────────────────────────────────────
+function drawSpectrum(freqData, fundamental, harmFreq) {
+  const w = specCanvas.width, h = specCanvas.height;
+  specCtx.clearRect(0, 0, w, h);
+
+  const sampleRate = audioCtx ? audioCtx.sampleRate : SAMPLE_RATE_DEFAULT;
+  const maxFreq = 5000;
+  const binHz = sampleRate / FFT_SIZE;
+  const maxBin = Math.floor(maxFreq / binHz);
+
+  // background grid
+  specCtx.strokeStyle = 'rgba(30,35,48,0.8)';
+  specCtx.lineWidth = 1;
+  for (let f = 500; f <= maxFreq; f += 500) {
+    const x = (f / maxFreq) * w;
+    specCtx.beginPath(); specCtx.moveTo(x, 0); specCtx.lineTo(x, h); specCtx.stroke();
+  }
+
+  // spectrum bars
+  const barW = Math.max(1, w / maxBin);
+  for (let i = 0; i < maxBin; i++) {
+    const freq = i * binHz;
+    const norm = Math.max(0, (freqData[i] - 40) / 60);
+    if (norm <= 0) continue;
+    const x = (freq / maxFreq) * w;
+    const bh = norm * h;
+    specCtx.fillStyle = `rgba(0,229,255,${norm * 0.6})`;
+    specCtx.fillRect(x, h - bh, barW, bh);
+  }
+
+  // highlight fundamental
+  if (fundamental) {
+    const x = (fundamental / maxFreq) * w;
+    specCtx.strokeStyle = '#00e5ff';
+    specCtx.lineWidth = 1.5 * devicePixelRatio;
+    specCtx.beginPath(); specCtx.moveTo(x, 0); specCtx.lineTo(x, h); specCtx.stroke();
+  }
+
+  // highlight selected harmonic
+  if (harmFreq) {
+    const x = (harmFreq / maxFreq) * w;
+    specCtx.strokeStyle = '#ffdd00';
+    specCtx.lineWidth = 2 * devicePixelRatio;
+    specCtx.beginPath(); specCtx.moveTo(x, 0); specCtx.lineTo(x, h); specCtx.stroke();
+  }
+}
+
+// ─── Update peaks list UI ────────────────────────────────────
+function updatePeaksUI(peaks, fundamental) {
+  peaksList.innerHTML = '';
+  if (!peaks.length) {
+    peaksList.innerHTML = '<span style="color:var(--dim);font-family:var(--mono);font-size:0.7rem;">—</span>';
+    return;
+  }
+  const sorted = [...peaks].sort((a,b) => a.freq - b.freq).slice(0, 10);
+  sorted.forEach((p, idx) => {
+    const chip = document.createElement('span');
+    chip.className = 'peak-chip';
+    if (fundamental && Math.abs(p.freq - fundamental) / fundamental < 0.02) chip.classList.add('fundamental');
+    if (fundamental) {
+      const ratio = p.freq / fundamental;
+      if (Math.abs(ratio - selectedHarmonic) < 0.03) chip.classList.add('selected-harm');
+    }
+    chip.textContent = `${p.freq.toFixed(1)}Hz`;
+    peaksList.appendChild(chip);
+  });
+}
+
+// ─── Main analysis loop ───────────────────────────────────────
+let frameCount = 0;
+let rmsHistory = [];
+
+function analyze() {
+  if (!isRunning) return;
+  animFrame = requestAnimationFrame(analyze);
+  frameCount++;
+
+  const bufLen = analyser.frequencyBinCount;
+  const freqData = new Uint8Array(bufLen);
+  const timeData = new Uint8Array(analyser.fftSize);
+  analyser.getByteFrequencyData(freqData);
+  analyser.getByteTimeDomainData(timeData);
+
+  const sampleRate = audioCtx.sampleRate;
+
+  // RMS
+  let rms = 0;
+  for (let i = 0; i < timeData.length; i++) {
+    const s = (timeData[i] - 128) / 128;
+    rms += s * s;
+  }
+  rms = Math.sqrt(rms / timeData.length);
+
+  // Detect peaks
+  const peaks = detectPeaks(freqData, sampleRate, FFT_SIZE * 2);
+  const fundamental = findFundamental(peaks);
+  const harmFreq = fundamental ? getHarmonicFreq(peaks, fundamental, selectedHarmonic) : null;
+
+  // Update note display
+  if (fundamental && rms > 0.01) {
+    const noteInfo = freqToNote(fundamental);
+    noteNameEl.textContent = noteInfo.name;
+    freqHzEl.textContent = fundamental.toFixed(2) + ' Hz';
+    const centsVal = noteInfo.cents;
+    freqCentsEl.textContent = (centsVal >= 0 ? '+' : '') + centsVal.toFixed(1) + ' cents';
+    freqCentsEl.style.color = Math.abs(centsVal) < 5 ? 'var(--green)' : Math.abs(centsVal) < 15 ? 'var(--yellow)' : 'var(--red)';
+  } else if (rms < 0.005) {
+    noteNameEl.textContent = '—';
+    freqHzEl.textContent = '— Hz';
+    freqCentsEl.textContent = '± — cents';
+  }
+
+  // Beat estimation via AM envelope
+  rmsHistory.push(rms);
+  if (rmsHistory.length > 300) rmsHistory.shift();
+  const beatHz = estimateBeatFFT(rms, sampleRate);
+  beatFreqEst = beatHz;
+
+  // Smooth display
+  if (rms > 0.01) {
+    lastBeatHz = lastBeatHz * 0.85 + beatHz * 0.15;
+  } else {
+    lastBeatHz = 0;
+  }
+
+  const displayBeat = lastBeatHz;
+
+  // Beat Hz display
+  if (rms > 0.008) {
+    if (displayBeat < 0.08) {
+      beatHzEl.textContent = '0.0 beat/s';
+      beatHzEl.classList.add('zero');
+    } else {
+      beatHzEl.textContent = displayBeat.toFixed(1) + ' beat/s';
+      beatHzEl.classList.remove('zero');
+    }
+  } else {
+    beatHzEl.textContent = '— beat/s';
+    beatHzEl.classList.remove('zero');
+  }
+
+  // Verdict
+  if (rms < 0.008) {
+    verdictEl.className = 'verdict out';
+    verdictText.textContent = 'SIGNAL WAITING...';
+  } else if (displayBeat < 0.08) {
+    verdictEl.className = 'verdict in-tune';
+    verdictText.textContent = 'IN TUNE ✓';
+  } else if (displayBeat < 1.5) {
+    verdictEl.className = 'verdict close';
+    verdictText.textContent = `BEAT ${displayBeat.toFixed(1)}/s — CLOSE`;
+  } else {
+    verdictEl.className = 'verdict out';
+    verdictText.textContent = `BEAT ${displayBeat.toFixed(1)}/s — ADJUST`;
+  }
+
+  // Draw
+  drawBeatWave(rms > 0.008 ? displayBeat : -1);
+  drawSpectrum(freqData, fundamental, harmFreq);
+  updatePeaksUI(peaks, fundamental);
+}
+
+// ─── Mic start/stop ──────────────────────────────────────────
+micBtn.addEventListener('click', async () => {
+  if (isRunning) {
+    stopMic();
+  } else {
+    await startMic();
+  }
+});
+
+async function startMic() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = FFT_SIZE * 2; // 16384 for high resolution
+    analyser.smoothingTimeConstant = 0.6;
+    analyser.minDecibels = -90;
+    analyser.maxDecibels = -10;
+
+    const source = audioCtx.createMediaStreamSource(micStream);
+    source.connect(analyser);
+
+    isRunning = true;
+    micBtn.textContent = '■ MIC OFF';
+    micBtn.classList.add('active');
+    statusText.textContent = '解析中... ピアノを弾いてください';
+    resizeCanvases();
+    analyze();
+  } catch(e) {
+    statusText.textContent = 'マイクのアクセスが拒否されました: ' + e.message;
+  }
+}
+
+function stopMic() {
+  isRunning = false;
+  cancelAnimationFrame(animFrame);
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  micBtn.textContent = '▶ MIC ON';
+  micBtn.classList.remove('active');
+  statusText.textContent = 'マイクをオンにして調律を開始';
+  noteNameEl.textContent = '—';
+  freqHzEl.textContent = '— Hz';
+  freqCentsEl.textContent = '± — cents';
+  beatHzEl.textContent = '— beat/s';
+  verdictEl.className = 'verdict out';
+  verdictText.textContent = 'SIGNAL WAITING...';
+  rmsHistory = [];
+  ampHistory2 = [];
+  envSamples = [];
+  lastBeatHz = 0;
+}
+</script>
+</body>
+</html>
