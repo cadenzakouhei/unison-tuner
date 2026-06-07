@@ -3,441 +3,417 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Unison Tuner</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Zen+Kaku+Gothic+New:wght@300;400;700&display=swap');
   :root {
     --bg: #0a0c0f; --panel: #111318; --border: #1e2330;
     --accent: #00e5ff; --green: #00ff88; --yellow: #ffdd00; --red: #ff3355;
     --text: #c8d0e0; --dim: #4a5568;
-    --mono: monospace;
+    --mono: 'Share Tech Mono', monospace; --sans: 'Zen Kaku Gothic New', sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 16px 12px 40px; }
-  h1 { font-family: var(--mono); font-size: 1rem; color: var(--accent); letter-spacing: 0.15em; margin-bottom: 16px; }
-  .grid { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 10px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; }
-  .row { display: flex; align-items: center; gap: 10px; }
-  button#mic-btn {
-    font-family: var(--mono); font-size: 0.8rem; padding: 8px 18px;
-    background: transparent; border: 1px solid var(--accent); color: var(--accent);
-    border-radius: 3px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.1em;
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--sans);
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 16px 12px 40px; overflow-x: hidden;
   }
-  button#mic-btn.on { background: var(--red); border-color: var(--red); color: #fff; }
-  #msg { font-family: var(--mono); font-size: 0.65rem; color: var(--dim); flex: 1; }
-
-/* level */
-.lev-label { font-family: var(–mono); font-size: 0.6rem; color: var(–dim); display: flex; justify-content: space-between; margin-bottom: 4px; }
-.lev-track { height: 14px; background: #0d0f14; border-radius: 3px; overflow: hidden; border: 1px solid var(–border); }
-#lev-fill { height: 100%; width: 0%; background: var(–accent); border-radius: 3px; transition: width 0.04s; }
-
-/* note */
-.note-row { display: flex; justify-content: space-between; align-items: center; }
-#note-name { font-family: var(–mono); font-size: 3rem; color: var(–accent); line-height: 1; }
-.note-right { text-align: right; }
-#freq-hz { font-family: var(–mono); font-size: 1.3rem; }
-#freq-cents { font-family: var(–mono); font-size: 0.75rem; color: var(–dim); margin-top: 3px; }
-
-/* harm */
-.harm-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.harm-row span { font-family: var(–mono); font-size: 0.65rem; color: var(–dim); white-space: nowrap; }
-.hbtn { font-family: var(–mono); font-size: 0.7rem; width: 36px; height: 28px; background: transparent; border: 1px solid var(–border); color: var(–dim); border-radius: 2px; cursor: pointer; }
-.hbtn.sel { background: var(–yellow); border-color: var(–yellow); color: #000; font-weight: bold; }
-
-/* verdict */
-.verdict { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 13px; border-radius: 4px; background: var(–panel); border: 1px solid var(–border); transition: border-color 0.3s; }
-.verdict.in { border-color: var(–green); }
-.verdict.close { border-color: var(–yellow); }
-.verdict.out { border-color: var(–red); }
-.vdot { width: 18px; height: 18px; border-radius: 50%; background: var(–dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
-.verdict.in .vdot { background: var(–green); box-shadow: 0 0 16px var(–green); }
-.verdict.close .vdot { background: var(–yellow); box-shadow: 0 0 10px var(–yellow); }
-.verdict.out .vdot { background: var(–red); box-shadow: 0 0 8px var(–red); }
-#vtext { font-family: var(–mono); font-size: 0.8rem; letter-spacing: 0.1em; }
-.verdict.in #vtext { color: var(–green); }
-.verdict.close #vtext { color: var(–yellow); }
-.verdict.out #vtext { color: var(–red); }
-#beat-disp { font-family: var(–mono); font-size: 0.95rem; color: var(–yellow); }
-#beat-disp.zero { color: var(–green); }
-
-/* sgram */
-.sgram-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px; }
-.slabel { font-family: var(–mono); font-size: 0.65rem; color: var(–dim); letter-spacing: 0.1em; text-transform: uppercase; }
-#freq-range { font-family: var(–mono); font-size: 0.58rem; color: var(–dim); }
-.sgram-wrap { position: relative; }
-#sgram { width: 100%; height: 250px; display: block; background: #000; border-radius: 2px; }
-.yaxis { position: absolute; right: 3px; top: 0; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 3px 0; pointer-events: none; }
-.yaxis span { font-family: var(–mono); font-size: 0.48rem; color: rgba(255,255,255,0.4); background: rgba(0,0,0,0.6); padding: 1px 3px; border-radius: 2px; text-align: right; }
-.yaxis span.sel { color: var(–yellow); }
-.yaxis span.intune { color: var(–green); }
-
-/* peaks */
-#peaks { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
-.pchip { font-family: var(–mono); font-size: 0.6rem; padding: 2px 5px; border: 1px solid var(–border); border-radius: 2px; }
-.pchip.fund { border-color: var(–accent); color: var(–accent); }
-.pchip.sel { border-color: var(–yellow); color: var(–yellow); }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+    pointer-events: none; z-index: 999;
+  }
+  header { width: 100%; max-width: 700px; display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  header h1 { font-family: var(--mono); font-size: 1.05rem; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; }
+  header span { font-size: 0.68rem; color: var(--dim); letter-spacing: 0.1em; }
+  .main-grid { width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 12px; }
+  .status-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  #mic-btn { font-family: var(--mono); font-size: 0.73rem; letter-spacing: 0.1em; background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 6px 14px; border-radius: 2px; cursor: pointer; transition: background 0.2s, color 0.2s; text-transform: uppercase; }
+  #mic-btn:hover { background: var(--accent); color: var(--bg); }
+  #mic-btn.active { background: var(--red); border-color: var(--red); color: #fff; }
+  #status-text { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); flex: 1; }
+  .note-display { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  .note-name { font-family: var(--mono); font-size: 2.6rem; color: var(--accent); line-height: 1; min-width: 90px; }
+  .freq-info { text-align: right; }
+  .freq-hz { font-family: var(--mono); font-size: 1.3rem; color: var(--text); }
+  .freq-cents { font-family: var(--mono); font-size: 0.75rem; color: var(--dim); margin-top: 4px; }
+  .harmonic-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; flex-wrap: wrap; }
+  .harmonic-row label { font-size: 0.68rem; color: var(--dim); letter-spacing: 0.08em; font-family: var(--mono); white-space: nowrap; }
+  .harm-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+  .harm-btn { font-family: var(--mono); font-size: 0.72rem; width: 36px; height: 30px; background: transparent; border: 1px solid var(--border); color: var(--dim); border-radius: 2px; cursor: pointer; transition: all 0.15s; }
+  .harm-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .harm-btn.selected { background: var(--yellow); border-color: var(--yellow); color: #000; font-weight: bold; }
+  .beat-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
+  .beat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .beat-label { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; }
+  #beat-hz { font-family: var(--mono); font-size: 1.05rem; color: var(--yellow); transition: color 0.3s; }
+  #beat-hz.zero { color: var(--green); }
+  #beat-canvas { width: 100%; height: 80px; display: block; border-radius: 2px; background: #0d0f14; }
+  .verdict { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; transition: border-color 0.4s; }
+  .verdict.in-tune { border-color: var(--green); }
+  .verdict.close   { border-color: var(--yellow); }
+  .verdict.out     { border-color: var(--red); }
+  .verdict-dot { width: 20px; height: 20px; border-radius: 50%; background: var(--dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
+  .verdict.in-tune .verdict-dot { background: var(--green); box-shadow: 0 0 18px var(--green); }
+  .verdict.close   .verdict-dot { background: var(--yellow); box-shadow: 0 0 12px var(--yellow); }
+  .verdict.out     .verdict-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .verdict-text { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.12em; color: var(--dim); transition: color 0.3s; }
+  .verdict.in-tune .verdict-text { color: var(--green); }
+  .verdict.close   .verdict-text { color: var(--yellow); }
+  .verdict.out     .verdict-text { color: var(--red); }
+  .spectrogram-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
+  .spectrogram-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 4px; }
+  .section-label { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; }
+  .freq-range-label { font-family: var(--mono); font-size: 0.62rem; color: var(--dim); }
+  .spectrogram-wrap { position: relative; }
+  #sgram-canvas { width: 100%; height: 240px; display: block; border-radius: 2px; background: #000; }
+  .sgram-yaxis { position: absolute; right: 4px; top: 0; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 4px 0; pointer-events: none; }
+  .sgram-yaxis span { font-family: var(--mono); font-size: 0.5rem; color: rgba(255,255,255,0.45); background: rgba(0,0,0,0.6); padding: 1px 4px; border-radius: 2px; line-height: 1.3; text-align: right; }
+  .sgram-yaxis span.sel { color: var(--yellow); font-weight: bold; }
+  .sgram-yaxis span.intune { color: var(--green); font-weight: bold; }
+  .peaks-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; }
+  #peaks-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .peak-chip { font-family: var(--mono); font-size: 0.62rem; padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px; color: var(--text); }
+  .peak-chip.fundamental { border-color: var(--accent); color: var(--accent); }
+  .peak-chip.selected-harm { border-color: var(--yellow); color: var(--yellow); }
 </style>
-
 </head>
 <body>
-<h1>UNISON TUNER</h1>
-<div class="grid">
-
-  <div class="card row">
+<header>
+  <h1>Unison Tuner</h1>
+  <span>PIANO · 2-STRING BEAT DETECTOR</span>
+</header>
+<div class="main-grid">
+  <div class="status-bar">
     <button id="mic-btn">▶ MIC ON</button>
-    <span id="msg">タップしてマイクを起動</span>
+    <span id="status-text">マイクをオンにして調律を開始</span>
   </div>
-
-  <div class="card">
-    <div class="lev-label"><span>INPUT LEVEL</span><span id="lev-num">0.0000</span></div>
-    <div class="lev-track"><div id="lev-fill"></div></div>
-  </div>
-
-  <div class="card">
-    <div class="note-row">
-      <div id="note-name">—</div>
-      <div class="note-right">
-        <div id="freq-hz">— Hz</div>
-        <div id="freq-cents">± — cents</div>
-      </div>
+  <div class="note-display">
+    <div class="note-name" id="note-name">—</div>
+    <div class="freq-info">
+      <div class="freq-hz" id="freq-hz">— Hz</div>
+      <div class="freq-cents" id="freq-cents">± — cents</div>
     </div>
   </div>
-
-  <div class="card">
-    <div class="harm-row">
-      <span>倍音選択：</span>
-      <div id="hbtns"></div>
-    </div>
+  <div class="harmonic-row">
+    <label>倍音選択：</label>
+    <div class="harm-btns" id="harm-btns"></div>
   </div>
-
+  <div class="beat-section">
+    <div class="beat-header">
+      <span class="beat-label">BEAT WAVEFORM</span>
+      <span id="beat-hz">— beat/s</span>
+    </div>
+    <canvas id="beat-canvas"></canvas>
+  </div>
   <div class="verdict out" id="verdict">
-    <div class="vdot"></div>
-    <span id="vtext">SIGNAL WAITING...</span>
-    <span id="beat-disp">—</span>
+    <div class="verdict-dot"></div>
+    <span class="verdict-text" id="verdict-text">SIGNAL WAITING...</span>
   </div>
-
-  <div class="card">
-    <div class="sgram-hdr">
-      <span class="slabel">SPECTROGRAM</span>
-      <span id="freq-range">基音〜第8倍音</span>
+  <div class="spectrogram-section">
+    <div class="spectrogram-header">
+      <span class="section-label">SPECTROGRAM</span>
+      <span class="freq-range-label" id="freq-range-label">基音〜第8倍音</span>
     </div>
-    <div class="sgram-wrap">
-      <canvas id="sgram"></canvas>
-      <div class="yaxis" id="yaxis"></div>
+    <div class="spectrogram-wrap">
+      <canvas id="sgram-canvas"></canvas>
+      <div class="sgram-yaxis" id="sgram-yaxis"></div>
     </div>
   </div>
-
-  <div class="card">
-    <div class="slabel">DETECTED PARTIALS</div>
-    <div id="peaks"><span style="color:var(--dim);font-size:0.6rem;font-family:monospace">—</span></div>
+  <div class="peaks-section">
+    <div class="section-label">DETECTED PARTIALS</div>
+    <div id="peaks-list"><span style="color:var(--dim);font-family:var(--mono);font-size:0.62rem;">—</span></div>
   </div>
-
 </div>
 <script>
-// ── constants ────────────────────────────────────────────────
-const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const A4 = 440;
-const FFTSIZE = 2048;  // small = fast on iOS
-const COLS = 180;
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const A4_FREQ = 440.0;
+const FFT_SIZE = 8192;
+const SGRAM_COLS = 300;
 
-// ── state ────────────────────────────────────────────────────
-let ctx=null, analyser=null, stream=null, running=false;
-let selHarm=4, lastBeat=0, smoothBeat=0, raf=null;
-let envBuf=[], sgramBuf=[];
-let f0=null, fMin=50, fMax=4000, throttle=0;
+let audioCtx=null, analyser=null, micStream=null;
+let isRunning=false, selectedHarmonic=4;
+let lastBeatHz=0, animFrame=null;
+let ampHistory2=[], sgramBuffer=[];
+let currentFundamental=null;
+let sgramFreqMin=0, sgramFreqMax=5000;
+let sgramThrottle=0, smoothBeat=0;
 
-// ── DOM ──────────────────────────────────────────────────────
-const micBtn   = document.getElementById(‘mic-btn’);
-const msg      = document.getElementById(‘msg’);
-const levFill  = document.getElementById(‘lev-fill’);
-const levNum   = document.getElementById(‘lev-num’);
-const noteName = document.getElementById(‘note-name’);
-const freqHz   = document.getElementById(‘freq-hz’);
-const freqCent = document.getElementById(‘freq-cents’);
-const verdict  = document.getElementById(‘verdict’);
-const vtext    = document.getElementById(‘vtext’);
-const beatDisp = document.getElementById(‘beat-disp’);
-const sgram    = document.getElementById(‘sgram’);
-const gc       = sgram.getContext(‘2d’);
-const yaxis    = document.getElementById(‘yaxis’);
-const freqRange= document.getElementById(‘freq-range’);
-const peaksEl  = document.getElementById(‘peaks’);
+const micBtn=document.getElementById(‘mic-btn’);
+const statusText=document.getElementById(‘status-text’);
+const noteNameEl=document.getElementById(‘note-name’);
+const freqHzEl=document.getElementById(‘freq-hz’);
+const freqCentsEl=document.getElementById(‘freq-cents’);
+const beatHzEl=document.getElementById(‘beat-hz’);
+const verdictEl=document.getElementById(‘verdict’);
+const verdictText=document.getElementById(‘verdict-text’);
+const peaksList=document.getElementById(‘peaks-list’);
+const freqRangeLabel=document.getElementById(‘freq-range-label’);
+const sgramYaxis=document.getElementById(‘sgram-yaxis’);
+const beatCanvas=document.getElementById(‘beat-canvas’);
+const beatCtx=beatCanvas.getContext(‘2d’);
+const sgramCanvas=document.getElementById(‘sgram-canvas’);
+const sgramCtx=sgramCanvas.getContext(‘2d’);
 
-// ── harmonic buttons ─────────────────────────────────────────
-const hbtns = document.getElementById(‘hbtns’);
-hbtns.style.display=‘flex’; hbtns.style.gap=‘5px’; hbtns.style.flexWrap=‘wrap’;
+const harmBtnsEl=document.getElementById(‘harm-btns’);
+function updateHarmonicUI(){
+document.querySelectorAll(’.harm-btn’).forEach((b,i)=>{
+if(i+1===selectedHarmonic)b.classList.add(‘selected’);else b.classList.remove(‘selected’);
+});
+updateSgramYaxis();
+}
 for(let i=1;i<=8;i++){
 const b=document.createElement(‘button’);
-b.className=‘hbtn’+(i===selHarm?’ sel’:’’);
+b.className=‘harm-btn’+(i===selectedHarmonic?’ selected’:’’);
 b.textContent=i===1?‘基音’:`${i}倍`;
-b.onclick=()=>{selHarm=i;document.querySelectorAll(’.hbtn’).forEach((x,j)=>{x.className=‘hbtn’+(j+1===selHarm?’ sel’:’’);});};
-hbtns.appendChild(b);
+b.addEventListener(‘click’,()=>{selectedHarmonic=i;updateHarmonicUI();});
+harmBtnsEl.appendChild(b);
 }
 
-// ── canvas size ──────────────────────────────────────────────
-function resize(){
-sgram.width=sgram.offsetWidth*devicePixelRatio;
-sgram.height=sgram.offsetHeight*devicePixelRatio;
+function resizeCanvases(){
+[beatCanvas,sgramCanvas].forEach(c=>{
+c.width=c.offsetWidth*devicePixelRatio;
+c.height=c.offsetHeight*devicePixelRatio;
+});
 }
-window.addEventListener(‘resize’,()=>{resize();sgramBuf=[];});
-resize();
+window.addEventListener(‘resize’,()=>{resizeCanvases();sgramBuffer=[];});
+resizeCanvases();
 
-// ── helpers ──────────────────────────────────────────────────
-function f2note(f){
-if(!f||f<=0)return{name:’—’,cents:0};
-const m=12*Math.log2(f/A4)+69,mr=Math.round(m);
-return{name:NOTES[((mr%12)+12)%12]+(Math.floor(mr/12)-1),cents:(m-mr)*100};
-}
-
-function peaks(fd,sr,fs,n=14){
-const bHz=sr/fs,lo=Math.floor(27/bHz),hi=Math.min(fd.length-3,Math.floor(7000/bHz)),out=[];
-for(let i=lo+2;i<hi-2;i++){
-const v=fd[i];
-if(v>fd[i-1]&&v>fd[i-2]&&v>fd[i+1]&&v>fd[i+2]&&v>20){
-const p=fd[i-1],nx=fd[i+1],d=2*(2*v-p-nx);
-out.push({f:(i+(d?((p-nx)/d):0))*bHz,a:v});
-}
-}
-return out.sort((a,b)=>b.a-a.a).slice(0,n);
+function freqToNote(freq){
+if(freq<=0)return{name:’—’,cents:0};
+const midi=12*Math.log2(freq/A4_FREQ)+69,midiR=Math.round(midi);
+return{name:NOTE_NAMES[((midiR%12)+12)%12]+(Math.floor(midiR/12)-1),cents:(midi-midiR)*100};
 }
 
-function fund(pks){
-let best=null,bs=-1;
-for(const p of pks.slice(0,8)){
-if(p.f<27||p.f>4200)continue;
-let sc=p.a;
-for(const q of pks){const r=q.f/p.f,n=Math.round(r);if(n>=2&&n<=8&&Math.abs(r-n)/n<0.03)sc+=q.a*0.5;}
-if(sc>bs){bs=sc;best=p.f;}
+function detectPeaks(freqData,sampleRate,fftSize,topN=16){
+const binHz=sampleRate/fftSize,minBin=Math.floor(20/binHz),maxBin=Math.min(freqData.length-3,Math.floor(8000/binHz)),peaks=[];
+for(let i=minBin+2;i<maxBin-2;i++){
+const v=freqData[i];
+if(v>freqData[i-1]&&v>freqData[i-2]&&v>freqData[i+1]&&v>freqData[i+2]&&v>60){
+const prev=freqData[i-1],next=freqData[i+1],denom=2*(2*v-prev-next);
+peaks.push({freq:(i+(denom!==0?(prev-next)/denom:0))*binHz,amp:v});
 }
-return best;
 }
-
-function beatEst(rms){
-envBuf.push(rms);
-if(envBuf.length>1024)envBuf.shift();
-if(envBuf.length<64)return 0;
-const N=Math.min(envBuf.length,256),sl=envBuf.slice(-N);
-const mn=sl.reduce((a,b)=>a+b,0)/N;
-let c=0;
-for(let i=1;i<sl.length;i++)if((sl[i]-mn)*(sl[i-1]-mn)<0)c++;
-const b=(c/2)/(N/60);
-return b>0.08&&b<20?b:0;
+return peaks.sort((a,b)=>b.amp-a.amp).slice(0,topN);
 }
 
-// ── colormap ─────────────────────────────────────────────────
-function cmap(v){
-const n=Math.max(0,Math.min(1,v));
+function findFundamental(peaks){
+if(!peaks.length)return null;
+let bestFund=null,bestScore=-1;
+for(const p of peaks.slice(0,6)){
+const f0=p.freq;if(f0<20||f0>4000)continue;
+let score=p.amp;
+for(const q of peaks){const ratio=q.freq/f0,n=Math.round(ratio);if(n>=2&&n<=8&&Math.abs(ratio-n)/n<0.02)score+=q.amp*0.5;}
+if(score>bestScore){bestScore=score;bestFund=f0;}
+}
+return bestFund;
+}
+
+function estimateBeatFFT(rmsVal){
+ampHistory2.push(rmsVal);
+if(ampHistory2.length>2048)ampHistory2.shift();
+if(ampHistory2.length<256)return 0;
+const N=Math.min(ampHistory2.length,512),slice=ampHistory2.slice(-N);
+const mean=slice.reduce((a,b)=>a+b,0)/N;
+let crossings=0;
+for(let i=1;i<slice.length;i++)if((slice[i]-mean)*(slice[i-1]-mean)<0)crossings++;
+const bHz=(crossings/2)/(N/60);
+return bHz>0.1&&bHz<25?bHz:0;
+}
+
+function selectedLineColor(beat){
+if(beat<0.08)return{stroke:‘rgba(0,255,136,0.95)’,glow:‘rgba(0,255,136,0.35)’,cls:‘intune’};
+if(beat<1.5)return{stroke:‘rgba(255,221,0,0.95)’,glow:‘rgba(255,221,0,0.3)’,cls:‘sel’};
+return{stroke:‘rgba(255,51,85,0.95)’,glow:‘rgba(255,51,85,0.3)’,cls:‘sel’};
+}
+
+function drawBeatWave(beatHz){
+const w=beatCanvas.width,h=beatCanvas.height;
+beatCtx.clearRect(0,0,w,h);
+const color=beatHz<0.05?’#00ff88’:beatHz<1.5?’#ffdd00’:’#ff3355’;
+beatCtx.strokeStyle=color;
+beatCtx.lineWidth=1.5*devicePixelRatio;
+beatCtx.beginPath();
+const now=performance.now()/1000,pts=300;
+for(let i=0;i<=pts;i++){
+const t=i/pts,x=t*w;
+const beatMod=beatHz>0?0.5+0.5*Math.cos(2*Math.PI*beatHz*(now+t*2)):1.0;
+const carrier=Math.sin(2*Math.PI*4*(now*0.5+t*3));
+const y=h/2+(h*0.38)*beatMod*carrier;
+i===0?beatCtx.moveTo(x,y):beatCtx.lineTo(x,y);
+}
+beatCtx.stroke();
+}
+
+function updateSgramYaxis(){
+sgramYaxis.innerHTML=’’;
+if(!currentFundamental)return;
+const col=selectedLineColor(smoothBeat);
+for(let n=8;n>=1;n–){
+const sp=document.createElement(‘span’);
+sp.textContent=`P${n} ${(currentFundamental*n).toFixed(0)}`;
+if(n===selectedHarmonic)sp.className=col.cls;
+sgramYaxis.appendChild(sp);
+}
+}
+
+function updateSgramFreqRange(fundamental){
+if(!fundamental||fundamental<=20)return;
+sgramFreqMin=Math.max(20,fundamental*0.85);
+sgramFreqMax=fundamental*8*1.12;
+currentFundamental=fundamental;
+freqRangeLabel.textContent=`${sgramFreqMin.toFixed(0)}〜${sgramFreqMax.toFixed(0)} Hz`;
+updateSgramYaxis();
+}
+
+function spectralColor(norm){
+const n=Math.max(0,Math.min(1,norm));
 let r,g,b;
-if(n<0.25){const t=n/0.25;r=0;g=0;b=Math.round(200*t);}
-else if(n<0.5){const t=(n-0.25)/0.25;r=0;g=Math.round(220*t);b=200;}
-else if(n<0.75){const t=(n-0.5)/0.25;r=Math.round(255*t);g=220;b=Math.round(200*(1-t));}
-else{const t=(n-0.75)/0.25;r=255;g=Math.round(220*(1-t*0.8));b=0;}
+if(n<0.2){const t=n/0.2;r=0;g=0;b=Math.round(180*t);}
+else if(n<0.4){const t=(n-0.2)/0.2;r=0;g=Math.round(220*t);b=180;}
+else if(n<0.6){const t=(n-0.4)/0.2;r=0;g=220;b=Math.round(180*(1-t));}
+else if(n<0.8){const t=(n-0.6)/0.2;r=Math.round(255*t);g=220;b=0;}
+else{const t=(n-0.8)/0.2;r=255;g=Math.round(220*(1-t));b=0;}
 return[r,g,b];
 }
 
-// ── selected line color ───────────────────────────────────────
-function lineColor(beat){
-if(beat<0.08)return{s:‘rgba(0,255,136,0.95)’,g:‘rgba(0,255,136,0.35)’,cls:‘intune’};
-if(beat<1.5) return{s:‘rgba(255,221,0,0.95)’, g:‘rgba(255,221,0,0.3)’,  cls:‘sel’};
-return             {s:‘rgba(255,51,85,0.95)’,  g:‘rgba(255,51,85,0.3)’,  cls:‘sel’};
-}
-
-// ── draw spectrogram ─────────────────────────────────────────
-function drawSgram(fd,sr,fs){
-const w=sgram.width,h=sgram.height;
-const bHz=sr/fs;
-const lo=Math.max(0,Math.floor(fMin/bHz));
-const hi=Math.min(fd.length-1,Math.ceil(fMax/bHz));
-const nb=hi-lo; if(nb<=0)return;
-
-const col=new Float32Array(nb);
-for(let i=0;i<nb;i++)col[i]=Math.max(0,(fd[lo+i]-5)/90);
-sgramBuf.push(col);
-if(sgramBuf.length>COLS)sgramBuf.shift();
-
-gc.fillStyle=’#000’;gc.fillRect(0,0,w,h);
-const cw=Math.max(1,w/COLS);
-for(let ci=0;ci<sgramBuf.length;ci++){
-const c=sgramBuf[ci];
-const x=Math.round((ci/COLS)*w);
-const pw=Math.max(1,Math.round(cw));
-const img=gc.createImageData(pw,h);
-const px=img.data;
+function drawSpectrogram(freqData,sampleRate,fftSize){
+const w=sgramCanvas.width,h=sgramCanvas.height;
+const binHz=sampleRate/fftSize;
+const minBin=Math.max(0,Math.floor(sgramFreqMin/binHz));
+const maxBin=Math.min(freqData.length-1,Math.ceil(sgramFreqMax/binHz));
+const colBins=maxBin-minBin;if(colBins<=0)return;
+const col=new Float32Array(colBins);
+for(let i=0;i<colBins;i++)col[i]=Math.max(0,(freqData[minBin+i]-30)/70);
+sgramBuffer.push(col);if(sgramBuffer.length>SGRAM_COLS)sgramBuffer.shift();
+sgramCtx.fillStyle=’#000’;sgramCtx.fillRect(0,0,w,h);
+const colW=Math.max(1,w/SGRAM_COLS);
+for(let ci=0;ci<sgramBuffer.length;ci++){
+const c=sgramBuffer[ci];
+const x=Math.round((ci/SGRAM_COLS)*w);
+const cw=Math.max(1,Math.round(colW));
+const imgData=sgramCtx.createImageData(cw,h);
+const px=imgData.data;
 for(let py=0;py<h;py++){
-const ff=1-(py/h);
-const bi=ff*(c.length-1);
-const b0=Math.floor(bi),b1=Math.min(c.length-1,b0+1);
+const ff=1-(py/h),bi=ff*(c.length-1),b0=Math.floor(bi),b1=Math.min(c.length-1,b0+1);
 const val=c[b0]*(1-(bi-b0))+c[b1]*(bi-b0);
-const[r,g,b]=cmap(val);
-for(let dx=0;dx<pw;dx++){const idx=(py*pw+dx)*4;px[idx]=r;px[idx+1]=g;px[idx+2]=b;px[idx+3]=255;}
+const[r,g,b]=spectralColor(val);
+for(let dx=0;dx<cw;dx++){const idx=(py*cw+dx)*4;px[idx]=r;px[idx+1]=g;px[idx+2]=b;px[idx+3]=255;}
 }
-gc.putImageData(img,x,0);
+sgramCtx.putImageData(imgData,x,0);
 }
-
-// partial lines
-if(f0){
-const lc=lineColor(smoothBeat);
+if(currentFundamental){
+const selCol=selectedLineColor(smoothBeat);
 for(let n=1;n<=8;n++){
-const freq=f0*n;
-if(freq<fMin||freq>fMax)continue;
-const ff=(freq-fMin)/(fMax-fMin);
-const py=(1-ff)*h;
-const isSel=n===selHarm;
+const freq=currentFundamental*n;
+if(freq<sgramFreqMin||freq>sgramFreqMax)continue;
+const freqFrac=(freq-sgramFreqMin)/(sgramFreqMax-sgramFreqMin);
+const py=(1-freqFrac)*h;
+const isSel=n===selectedHarmonic;
 if(isSel){
-gc.save();
-gc.strokeStyle=lc.g;gc.lineWidth=12*devicePixelRatio;
-gc.shadowBlur=16*devicePixelRatio;gc.shadowColor=lc.s;
-gc.beginPath();gc.moveTo(0,py);gc.lineTo(w,py);gc.stroke();
-gc.strokeStyle=lc.s;gc.lineWidth=3.5*devicePixelRatio;gc.shadowBlur=0;
-gc.beginPath();gc.moveTo(0,py);gc.lineTo(w,py);gc.stroke();
-gc.restore();
+sgramCtx.save();
+sgramCtx.strokeStyle=selCol.glow;sgramCtx.lineWidth=10*devicePixelRatio;
+sgramCtx.shadowBlur=14*devicePixelRatio;sgramCtx.shadowColor=selCol.stroke;
+sgramCtx.beginPath();sgramCtx.moveTo(0,py);sgramCtx.lineTo(w,py);sgramCtx.stroke();
+sgramCtx.strokeStyle=selCol.stroke;sgramCtx.lineWidth=3*devicePixelRatio;sgramCtx.shadowBlur=0;
+sgramCtx.beginPath();sgramCtx.moveTo(0,py);sgramCtx.lineTo(w,py);sgramCtx.stroke();
+sgramCtx.restore();
 } else {
-gc.strokeStyle=‘rgba(255,255,255,0.2)’;gc.lineWidth=1.2*devicePixelRatio;
-gc.setLineDash([4,5]);
-gc.beginPath();gc.moveTo(0,py);gc.lineTo(w,py);gc.stroke();
-gc.setLineDash([]);
-gc.fillStyle=‘rgba(255,255,255,0.3)’;
-gc.font=`${Math.round(8*devicePixelRatio)}px monospace`;
-gc.textAlign=‘left’;gc.fillText(`P${n}`,3,py-3);
+sgramCtx.strokeStyle=‘rgba(255,255,255,0.22)’;sgramCtx.lineWidth=1.5*devicePixelRatio;
+sgramCtx.setLineDash([5,5]);
+sgramCtx.beginPath();sgramCtx.moveTo(0,py);sgramCtx.lineTo(w,py);sgramCtx.stroke();
+sgramCtx.setLineDash([]);
+sgramCtx.fillStyle=‘rgba(255,255,255,0.35)’;
+sgramCtx.font=`${Math.round(8*devicePixelRatio)}px monospace`;
+sgramCtx.textAlign=‘left’;sgramCtx.fillText(`P${n}`,4,py-3);
 }
 }
 }
 }
 
-// ── update yaxis ─────────────────────────────────────────────
-function updateYaxis(){
-yaxis.innerHTML=’’;
-if(!f0)return;
-const lc=lineColor(smoothBeat);
-for(let n=8;n>=1;n–){
-const sp=document.createElement(‘span’);
-sp.textContent=`P${n} ${(f0*n).toFixed(0)}`;
-if(n===selHarm)sp.className=lc.cls;
-yaxis.appendChild(sp);
-}
-}
-
-// ── update peaks ─────────────────────────────────────────────
-function updatePeaks(pks){
-peaksEl.innerHTML=’’;
-if(!pks.length){peaksEl.innerHTML=’<span style="color:var(--dim);font-size:0.6rem;font-family:monospace">—</span>’;return;}
-[…pks].sort((a,b)=>a.f-b.f).slice(0,10).forEach(p=>{
-const c=document.createElement(‘span’);c.className=‘pchip’;
-if(f0&&Math.abs(p.f-f0)/f0<0.02)c.classList.add(‘fund’);
-if(f0&&Math.abs(p.f/f0-selHarm)<0.03)c.classList.add(‘sel’);
-c.textContent=`${p.f.toFixed(1)}Hz`;peaksEl.appendChild(c);
+function updatePeaksUI(peaks,fundamental){
+peaksList.innerHTML=’’;
+if(!peaks.length){peaksList.innerHTML=’<span style="color:var(--dim);font-family:var(--mono);font-size:0.62rem;">—</span>’;return;}
+[…peaks].sort((a,b)=>a.freq-b.freq).slice(0,10).forEach(p=>{
+const chip=document.createElement(‘span’);chip.className=‘peak-chip’;
+if(fundamental&&Math.abs(p.freq-fundamental)/fundamental<0.02)chip.classList.add(‘fundamental’);
+if(fundamental&&Math.abs(p.freq/fundamental-selectedHarmonic)<0.03)chip.classList.add(‘selected-harm’);
+chip.textContent=`${p.freq.toFixed(1)}Hz`;peaksList.appendChild(chip);
 });
 }
 
-// ── main loop ─────────────────────────────────────────────────
-function loop(){
-if(!running)return;
-raf=requestAnimationFrame(loop);
-
-const fd=new Uint8Array(analyser.frequencyBinCount);
-const td=new Uint8Array(analyser.fftSize);
-analyser.getByteFrequencyData(fd);
-analyser.getByteTimeDomainData(td);
-const sr=ctx.sampleRate;
-
-// RMS
+function analyze(){
+if(!isRunning)return;
+animFrame=requestAnimationFrame(analyze);
+const freqData=new Uint8Array(analyser.frequencyBinCount);
+const timeData=new Uint8Array(analyser.fftSize);
+analyser.getByteFrequencyData(freqData);
+analyser.getByteTimeDomainData(timeData);
+const sampleRate=audioCtx.sampleRate;
 let rms=0;
-for(let i=0;i<td.length;i++){const s=(td[i]-128)/128;rms+=s*s;}
-rms=Math.sqrt(rms/td.length);
-
-// level meter
-const pct=Math.min(100,rms*600);
-levFill.style.width=pct+’%’;
-levFill.style.background=pct>70?‘var(–red)’:pct>30?‘var(–yellow)’:‘var(–accent)’;
-levNum.textContent=rms.toFixed(5);
-
-// detect
-const pks=peaks(fd,sr,FFTSIZE);
-const detected=fund(pks);
-if(detected&&rms>0.001){
-f0=detected*0.9+( f0||detected)*0.1; // smooth
-fMin=Math.max(20,f0*0.82);
-fMax=f0*8*1.15;
-const ni=f2note(f0);
-noteName.textContent=ni.name;
-freqHz.textContent=f0.toFixed(2)+’ Hz’;
-freqCent.textContent=(ni.cents>=0?’+’:’’)+ni.cents.toFixed(1)+’ cents’;
-freqCent.style.color=Math.abs(ni.cents)<5?‘var(–green)’:Math.abs(ni.cents)<15?‘var(–yellow)’:‘var(–red)’;
-freqRange.textContent=`${fMin.toFixed(0)}〜${fMax.toFixed(0)} Hz`;
-} else if(rms<0.0005){
-noteName.textContent=’—’;freqHz.textContent=’— Hz’;freqCent.textContent=‘± — cents’;
+for(let i=0;i<timeData.length;i++){const s=(timeData[i]-128)/128;rms+=s*s;}
+rms=Math.sqrt(rms/timeData.length);
+const peaks=detectPeaks(freqData,sampleRate,FFT_SIZE);
+const fundamental=findFundamental(peaks);
+if(fundamental&&rms>0.005){
+const ni=freqToNote(fundamental);
+noteNameEl.textContent=ni.name;
+freqHzEl.textContent=fundamental.toFixed(2)+’ Hz’;
+freqCentsEl.textContent=(ni.cents>=0?’+’:’’)+ni.cents.toFixed(1)+’ cents’;
+freqCentsEl.style.color=Math.abs(ni.cents)<5?‘var(–green)’:Math.abs(ni.cents)<15?‘var(–yellow)’:‘var(–red)’;
+updateSgramFreqRange(fundamental);
+} else if(rms<0.002){
+noteNameEl.textContent=’—’;freqHzEl.textContent=’— Hz’;freqCentsEl.textContent=‘± — cents’;
+}
+const beatHz=estimateBeatFFT(rms);
+if(rms>0.005)lastBeatHz=lastBeatHz*0.85+beatHz*0.15;else lastBeatHz=0;
+smoothBeat=lastBeatHz;const db=smoothBeat;
+if(rms>0.005){
+if(db<0.08){beatHzEl.textContent=‘0.0 beat/s’;beatHzEl.classList.add(‘zero’);}
+else{beatHzEl.textContent=db.toFixed(1)+’ beat/s’;beatHzEl.classList.remove(‘zero’);}
+}else{beatHzEl.textContent=’— beat/s’;beatHzEl.classList.remove(‘zero’);}
+if(rms<0.005){verdictEl.className=‘verdict out’;verdictText.textContent=‘SIGNAL WAITING…’;}
+else if(db<0.08){verdictEl.className=‘verdict in-tune’;verdictText.textContent=‘IN TUNE ✓’;}
+else if(db<1.5){verdictEl.className=‘verdict close’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s — CLOSE`;}
+else{verdictEl.className=‘verdict out’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s — ADJUST`;}
+drawBeatWave(rms>0.005?db:-1);
+sgramThrottle++;
+if(sgramThrottle>=3){sgramThrottle=0;drawSpectrogram(freqData,sampleRate,FFT_SIZE);}
+updatePeaksUI(peaks,fundamental);
+updateSgramYaxis();
 }
 
-// beat
-const bRaw=beatEst(rms);
-if(rms>0.001) lastBeat=lastBeat*0.88+bRaw*0.12; else lastBeat*=0.95;
-smoothBeat=lastBeat;
-const db=smoothBeat;
+micBtn.addEventListener(‘click’,async()=>{isRunning?stopMic():await startMic();});
 
-if(rms>0.001){
-if(db<0.08){beatDisp.textContent=‘0.0 beat/s’;beatDisp.classList.add(‘zero’);}
-else{beatDisp.textContent=db.toFixed(1)+’ beat/s’;beatDisp.classList.remove(‘zero’);}
-} else {beatDisp.textContent=’—’;beatDisp.classList.remove(‘zero’);}
-
-// verdict
-if(rms<0.001){verdict.className=‘verdict out’;vtext.textContent=‘SIGNAL WAITING…’;}
-else if(db<0.08){verdict.className=‘verdict in’;vtext.textContent=‘IN TUNE ✓’;}
-else if(db<1.5){verdict.className=‘verdict close’;vtext.textContent=`BEAT ${db.toFixed(1)}/s — CLOSE`;}
-else{verdict.className=‘verdict out’;vtext.textContent=`BEAT ${db.toFixed(1)}/s — ADJUST`;}
-
-throttle++;
-if(throttle>=2){throttle=0;drawSgram(fd,sr,FFTSIZE);}
-updatePeaks(pks);
-updateYaxis();
+async function startMic(){
+try{
+micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
+audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:44100});
+analyser=audioCtx.createAnalyser();
+analyser.fftSize=FFT_SIZE;
+analyser.smoothingTimeConstant=0.6;
+analyser.minDecibels=-90;analyser.maxDecibels=-10;
+audioCtx.createMediaStreamSource(micStream).connect(analyser);
+isRunning=true;
+micBtn.textContent=‘■ MIC OFF’;micBtn.classList.add(‘active’);
+statusText.textContent=‘解析中… ピアノを弾いてください’;
+resizeCanvases();analyze();
+}catch(e){statusText.textContent=’マイクアクセス拒否: ’+e.message;}
 }
 
-// ── mic ──────────────────────────────────────────────────────
-micBtn.addEventListener(‘click’, async()=>{
-if(running){ stop(); return; }
-
-// iOS requires AudioContext created inside user gesture
-try {
-ctx = new (window.AudioContext||window.webkitAudioContext)();
-} catch(e){ msg.textContent=’AudioContext error: ’+e.message; return; }
-
-// resume if suspended (iOS quirk)
-if(ctx.state===‘suspended’) await ctx.resume();
-
-try {
-stream = await navigator.mediaDevices.getUserMedia({
-audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false },
-video:false
-});
-} catch(e){ msg.textContent=’マイク拒否: ’+e.message; ctx.close(); ctx=null; return; }
-
-analyser=ctx.createAnalyser();
-analyser.fftSize=FFTSIZE;
-analyser.smoothingTimeConstant=0.75;
-analyser.minDecibels=-100;
-analyser.maxDecibels=-5;
-
-ctx.createMediaStreamSource(stream).connect(analyser);
-
-running=true;
-micBtn.textContent=‘■ STOP’;micBtn.classList.add(‘on’);
-msg.textContent=‘解析中… ピアノを弾いてください’;
-resize(); loop();
-});
-
-function stop(){
-running=false; cancelAnimationFrame(raf);
-if(stream) stream.getTracks().forEach(t=>t.stop());
-if(ctx) ctx.close();
-ctx=null; stream=null; analyser=null;
-micBtn.textContent=‘▶ MIC ON’; micBtn.classList.remove(‘on’);
-msg.textContent=‘タップしてマイクを起動’;
-noteName.textContent=’—’; freqHz.textContent=’— Hz’; freqCent.textContent=‘± — cents’;
-beatDisp.textContent=’—’; beatDisp.classList.remove(‘zero’);
-verdict.className=‘verdict out’; vtext.textContent=‘SIGNAL WAITING…’;
-levFill.style.width=‘0%’; levNum.textContent=‘0.0000’;
-envBuf=[]; sgramBuf=[]; f0=null; lastBeat=0; smoothBeat=0;
-gc.clearRect(0,0,sgram.width,sgram.height);
-yaxis.innerHTML=’’; freqRange.textContent=‘基音〜第8倍音’;
+function stopMic(){
+isRunning=false;cancelAnimationFrame(animFrame);
+if(micStream)micStream.getTracks().forEach(t=>t.stop());
+if(audioCtx)audioCtx.close();
+micBtn.textContent=‘▶ MIC ON’;micBtn.classList.remove(‘active’);
+statusText.textContent=‘マイクをオンにして調律を開始’;
+noteNameEl.textContent=’—’;freqHzEl.textContent=’— Hz’;freqCentsEl.textContent=‘± — cents’;
+beatHzEl.textContent=’— beat/s’;beatHzEl.classList.remove(‘zero’);
+verdictEl.className=‘verdict out’;verdictText.textContent=‘SIGNAL WAITING…’;
+ampHistory2=[];lastBeatHz=0;smoothBeat=0;sgramBuffer=[];currentFundamental=null;
+sgramCtx.clearRect(0,0,sgramCanvas.width,sgramCanvas.height);
+sgramYaxis.innerHTML=’’;freqRangeLabel.textContent=‘基音〜第8倍音’;
 }
 </script>
 
