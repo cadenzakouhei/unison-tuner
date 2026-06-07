@@ -1,1 +1,651 @@
 # unison-tuner
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison Tuner</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Zen+Kaku+Gothic+New:wght@300;400;700&display=swap');
+  :root {
+    --bg: #0a0c0f; --panel: #111318; --border: #1e2330;
+    --accent: #00e5ff; --green: #00ff88; --yellow: #ffdd00; --red: #ff3355;
+    --text: #c8d0e0; --dim: #4a5568;
+    --mono: 'Share Tech Mono', monospace; --sans: 'Zen Kaku Gothic New', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--sans);
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 16px 12px 40px; overflow-x: hidden;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+    pointer-events: none; z-index: 999;
+  }
+  header {
+    width: 100%; max-width: 700px; display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px;
+  }
+  header h1 { font-family: var(--mono); font-size: 1.05rem; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; }
+  header span { font-size: 0.68rem; color: var(--dim); letter-spacing: 0.1em; }
+  .main-grid { width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 12px; }
+
+/* status */
+.status-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
+#mic-btn {
+font-family: var(–mono); font-size: 0.73rem; letter-spacing: 0.1em;
+background: transparent; border: 1px solid var(–accent); color: var(–accent);
+padding: 6px 14px; border-radius: 2px; cursor: pointer; transition: background 0.2s, color 0.2s; text-transform: uppercase;
+}
+#mic-btn:hover { background: var(–accent); color: var(–bg); }
+#mic-btn.active { background: var(–red); border-color: var(–red); color: #fff; }
+#status-text { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); flex: 1; }
+
+/* note display */
+.note-display { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
+.note-name { font-family: var(–mono); font-size: 2.6rem; color: var(–accent); line-height: 1; min-width: 90px; }
+.freq-info { text-align: right; }
+.freq-hz { font-family: var(–mono); font-size: 1.3rem; color: var(–text); }
+.freq-cents { font-family: var(–mono); font-size: 0.75rem; color: var(–dim); margin-top: 4px; }
+
+/* harmonic */
+.harmonic-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; flex-wrap: wrap; }
+.harmonic-row label { font-size: 0.68rem; color: var(–dim); letter-spacing: 0.08em; font-family: var(–mono); white-space: nowrap; }
+.harm-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+.harm-btn { font-family: var(–mono); font-size: 0.72rem; width: 36px; height: 30px; background: transparent; border: 1px solid var(–border); color: var(–dim); border-radius: 2px; cursor: pointer; transition: all 0.15s; }
+.harm-btn:hover { border-color: var(–accent); color: var(–accent); }
+.harm-btn.selected { background: var(–accent); border-color: var(–accent); color: var(–bg); }
+
+/* ── PARTIAL METER (replaces beat waveform) ── */
+.partial-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
+.partial-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.partial-label { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; }
+#beat-hz { font-family: var(–mono); font-size: 1.05rem; color: var(–yellow); transition: color 0.3s; }
+#beat-hz.zero { color: var(–green); }
+
+/* 8 vertical bars, equally spaced */
+.partial-bars {
+display: flex;
+gap: 6px;
+align-items: flex-end;
+height: 160px;
+padding: 0 2px;
+}
+.partial-bar-wrap {
+flex: 1;
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 5px;
+height: 100%;
+}
+.partial-bar-track {
+flex: 1;
+width: 100%;
+background: #0d0f14;
+border-radius: 3px;
+position: relative;
+overflow: hidden;
+border: 1px solid #1a1f2a;
+}
+.partial-bar-fill {
+position: absolute;
+bottom: 0;
+left: 0;
+right: 0;
+border-radius: 3px 3px 0 0;
+transition: height 0.06s ease-out, background 0.2s;
+height: 0%;
+background: var(–dim);
+}
+.partial-bar-fill.selected {
+box-shadow: 0 0 10px currentColor;
+}
+.partial-bar-label {
+font-family: var(–mono);
+font-size: 0.6rem;
+color: var(–dim);
+text-align: center;
+line-height: 1.2;
+white-space: nowrap;
+}
+.partial-bar-label.selected { color: var(–yellow); }
+
+/* verdict */
+.verdict { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; transition: border-color 0.4s; }
+.verdict.in-tune { border-color: var(–green); }
+.verdict.close   { border-color: var(–yellow); }
+.verdict.out     { border-color: var(–red); }
+.verdict-dot { width: 20px; height: 20px; border-radius: 50%; background: var(–dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
+.verdict.in-tune .verdict-dot { background: var(–green); box-shadow: 0 0 18px var(–green); }
+.verdict.close   .verdict-dot { background: var(–yellow); box-shadow: 0 0 12px var(–yellow); }
+.verdict.out     .verdict-dot { background: var(–red); box-shadow: 0 0 8px var(–red); }
+.verdict-text { font-family: var(–mono); font-size: 0.82rem; letter-spacing: 0.12em; color: var(–dim); transition: color 0.3s; }
+.verdict.in-tune .verdict-text { color: var(–green); }
+.verdict.close   .verdict-text { color: var(–yellow); }
+.verdict.out     .verdict-text { color: var(–red); }
+
+/* spectrogram */
+.spectrogram-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
+.spectrogram-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.spectrogram-label { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; }
+.freq-range-label { font-family: var(–mono); font-size: 0.62rem; color: var(–dim); }
+.spectrogram-wrap { position: relative; width: 100%; height: 200px; }
+#sgram-canvas { width: 100%; height: 100%; display: block; border-radius: 2px; background: #000; }
+.sgram-yaxis { position: absolute; left: 0; top: 0; height: 100%; width: 44px; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 0; }
+.sgram-yaxis span { font-family: var(–mono); font-size: 0.52rem; color: rgba(255,255,255,0.45); background: rgba(0,0,0,0.5); padding: 1px 3px; border-radius: 2px; line-height: 1.2; }
+
+/* FFT spectrum */
+.spectrum-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
+.spectrum-label { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 8px; }
+#spectrum-canvas { width: 100%; height: 70px; display: block; border-radius: 2px; background: #0d0f14; }
+
+/* peaks */
+.peaks-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
+.peaks-label { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 8px; }
+#peaks-list { display: flex; gap: 7px; flex-wrap: wrap; }
+.peak-chip { font-family: var(–mono); font-size: 0.65rem; padding: 2px 7px; border: 1px solid var(–border); border-radius: 2px; color: var(–text); }
+.peak-chip.fundamental { border-color: var(–accent); color: var(–accent); }
+.peak-chip.selected-harm { border-color: var(–yellow); color: var(–yellow); }
+</style>
+
+</head>
+<body>
+
+<header>
+  <h1>Unison Tuner</h1>
+  <span>PIANO · 2-STRING BEAT DETECTOR</span>
+</header>
+
+<div class="main-grid">
+
+  <div class="status-bar">
+    <button id="mic-btn">▶ MIC ON</button>
+    <span id="status-text">マイクをオンにして調律を開始</span>
+  </div>
+
+  <div class="note-display">
+    <div class="note-name" id="note-name">—</div>
+    <div class="freq-info">
+      <div class="freq-hz" id="freq-hz">— Hz</div>
+      <div class="freq-cents" id="freq-cents">± — cents</div>
+    </div>
+  </div>
+
+  <div class="harmonic-row">
+    <label>倍音選択：</label>
+    <div class="harm-btns" id="harm-btns"></div>
+  </div>
+
+  <!-- Partial level meters (replaces beat waveform) -->
+
+  <div class="partial-section">
+    <div class="partial-header">
+      <span class="partial-label">PARTIAL LEVELS · P1〜P8</span>
+      <span id="beat-hz">— beat/s</span>
+    </div>
+    <div class="partial-bars" id="partial-bars"></div>
+  </div>
+
+  <div class="verdict out" id="verdict">
+    <div class="verdict-dot"></div>
+    <span class="verdict-text" id="verdict-text">SIGNAL WAITING...</span>
+  </div>
+
+  <!-- Spectrogram -->
+
+  <div class="spectrogram-section">
+    <div class="spectrogram-header">
+      <span class="spectrogram-label">SPECTROGRAM</span>
+      <span class="freq-range-label" id="freq-range-label">基音〜第8倍音</span>
+    </div>
+    <div class="spectrogram-wrap">
+      <canvas id="sgram-canvas"></canvas>
+      <div class="sgram-yaxis" id="sgram-yaxis"></div>
+    </div>
+  </div>
+
+  <div class="spectrum-section">
+    <div class="spectrum-label">FFT SPECTRUM</div>
+    <canvas id="spectrum-canvas"></canvas>
+  </div>
+
+  <div class="peaks-section">
+    <div class="peaks-label">DETECTED PARTIALS</div>
+    <div id="peaks-list"><span style="color:var(--dim);font-family:var(--mono);font-size:0.68rem;">—</span></div>
+  </div>
+
+</div>
+
+<script>
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const A4_FREQ = 440.0;
+const FFT_SIZE = 8192;
+const SGRAM_COLS = 300;
+
+let audioCtx = null, analyser = null, micStream = null;
+let isRunning = false;
+let selectedHarmonic = 4;
+let lastBeatHz = 0;
+let animFrame = null;
+let ampHistory2 = [];
+let rmsHistory = [];
+let sgramBuffer = [];
+let currentFundamental = null;
+let sgramFreqMin = 0, sgramFreqMax = 5000;
+
+// UI
+const micBtn       = document.getElementById('mic-btn');
+const statusText   = document.getElementById('status-text');
+const noteNameEl   = document.getElementById('note-name');
+const freqHzEl     = document.getElementById('freq-hz');
+const freqCentsEl  = document.getElementById('freq-cents');
+const beatHzEl     = document.getElementById('beat-hz');
+const verdictEl    = document.getElementById('verdict');
+const verdictText  = document.getElementById('verdict-text');
+const peaksList    = document.getElementById('peaks-list');
+const freqRangeLabel = document.getElementById('freq-range-label');
+const sgramYaxis   = document.getElementById('sgram-yaxis');
+const specCanvas   = document.getElementById('spectrum-canvas');
+const specCtx      = specCanvas.getContext('2d');
+const sgramCanvas  = document.getElementById('sgram-canvas');
+const sgramCtx     = sgramCanvas.getContext('2d');
+
+// ── Build partial bar meters ──────────────────────────────────
+const partialBarsEl = document.getElementById('partial-bars');
+const barFills = [];
+const barLabels = [];
+for (let n = 1; n <= 8; n++) {
+  const wrap = document.createElement('div');
+  wrap.className = 'partial-bar-wrap';
+
+  const track = document.createElement('div');
+  track.className = 'partial-bar-track';
+
+  const fill = document.createElement('div');
+  fill.className = 'partial-bar-fill' + (n === selectedHarmonic ? ' selected' : '');
+  track.appendChild(fill);
+  barFills.push(fill);
+
+  const label = document.createElement('div');
+  label.className = 'partial-bar-label' + (n === selectedHarmonic ? ' selected' : '');
+  label.innerHTML = `P${n}<br><span id="plabel${n}">—</span>`;
+  barLabels.push(label);
+
+  wrap.appendChild(track);
+  wrap.appendChild(label);
+  partialBarsEl.appendChild(wrap);
+}
+
+// ── Harmonic buttons ─────────────────────────────────────────
+const harmBtnsEl = document.getElementById('harm-btns');
+for (let i = 1; i <= 8; i++) {
+  const b = document.createElement('button');
+  b.className = 'harm-btn' + (i === selectedHarmonic ? ' selected' : '');
+  b.textContent = i === 1 ? '基音' : `${i}倍`;
+  b.addEventListener('click', () => {
+    selectedHarmonic = i;
+    document.querySelectorAll('.harm-btn').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+    // update bar highlight
+    barFills.forEach((f, idx) => {
+      if (idx + 1 === selectedHarmonic) f.classList.add('selected');
+      else f.classList.remove('selected');
+    });
+    barLabels.forEach((l, idx) => {
+      if (idx + 1 === selectedHarmonic) l.classList.add('selected');
+      else l.classList.remove('selected');
+    });
+  });
+  harmBtnsEl.appendChild(b);
+}
+
+// ── Resize canvases ──────────────────────────────────────────
+function resizeCanvases() {
+  [specCanvas, sgramCanvas].forEach(c => {
+    c.width  = c.offsetWidth  * devicePixelRatio;
+    c.height = c.offsetHeight * devicePixelRatio;
+  });
+}
+window.addEventListener('resize', () => { resizeCanvases(); sgramBuffer = []; });
+resizeCanvases();
+
+// ── Helpers ──────────────────────────────────────────────────
+function freqToNote(freq) {
+  if (freq <= 0) return { name: '—', cents: 0 };
+  const midi = 12 * Math.log2(freq / A4_FREQ) + 69;
+  const midiR = Math.round(midi);
+  const cents = (midi - midiR) * 100;
+  const oct = Math.floor(midiR / 12) - 1;
+  return { name: NOTE_NAMES[((midiR % 12) + 12) % 12] + oct, cents };
+}
+
+function detectPeaks(freqData, sampleRate, fftSize, topN = 16) {
+  const binHz = sampleRate / fftSize;
+  const minBin = Math.floor(20 / binHz);
+  const maxBin = Math.floor(9000 / binHz);
+  const peaks = [];
+  for (let i = minBin + 2; i < maxBin - 2; i++) {
+    const v = freqData[i];
+    if (v > freqData[i-1] && v > freqData[i-2] && v > freqData[i+1] && v > freqData[i+2] && v > 70) {
+      const prev = freqData[i-1], next = freqData[i+1];
+      const denom = 2 * (2*v - prev - next);
+      const offset = denom !== 0 ? (prev - next) / denom : 0;
+      peaks.push({ freq: (i + offset) * binHz, amp: v });
+    }
+  }
+  peaks.sort((a,b) => b.amp - a.amp);
+  return peaks.slice(0, topN);
+}
+
+function findFundamental(peaks) {
+  if (!peaks.length) return null;
+  let bestFund = null, bestScore = -1;
+  for (const p of peaks.slice(0, 6)) {
+    const f0 = p.freq;
+    if (f0 < 20 || f0 > 4000) continue;
+    let score = p.amp;
+    for (const q of peaks) {
+      const ratio = q.freq / f0, n = Math.round(ratio);
+      if (n >= 2 && n <= 8 && Math.abs(ratio - n) / n < 0.02) score += q.amp * 0.5;
+    }
+    if (score > bestScore) { bestScore = score; bestFund = f0; }
+  }
+  return bestFund;
+}
+
+function getPartialAmps(freqData, sampleRate, fftSize, fundamental) {
+  // Returns amplitude 0..1 for each partial P1..P8
+  const binHz = sampleRate / fftSize;
+  const amps = new Array(8).fill(0);
+  if (!fundamental) return amps;
+  for (let n = 1; n <= 8; n++) {
+    const targetFreq = fundamental * n;
+    const targetBin = targetFreq / binHz;
+    // search ±3% window
+    const windowBins = Math.ceil(targetBin * 0.03);
+    let maxAmp = 0;
+    for (let b = Math.max(0, Math.floor(targetBin) - windowBins);
+             b <= Math.min(freqData.length - 1, Math.floor(targetBin) + windowBins); b++) {
+      if (freqData[b] > maxAmp) maxAmp = freqData[b];
+    }
+    amps[n-1] = Math.max(0, (maxAmp - 30) / 100); // normalize 0..1
+  }
+  return amps;
+}
+
+// ── Beat estimation via AM envelope ─────────────────────────
+function estimateBeatFFT(rmsVal) {
+  ampHistory2.push(rmsVal);
+  if (ampHistory2.length > 2048) ampHistory2.shift();
+  if (ampHistory2.length < 256) return 0;
+  const N = Math.min(ampHistory2.length, 512);
+  const slice = ampHistory2.slice(-N);
+  const mean = slice.reduce((a,b) => a+b, 0) / N;
+  let crossings = 0;
+  for (let i = 1; i < slice.length; i++) {
+    if ((slice[i] - mean) * (slice[i-1] - mean) < 0) crossings++;
+  }
+  const beatHz = (crossings / 2) / (N / 60);
+  return beatHz > 0.1 && beatHz < 25 ? beatHz : 0;
+}
+
+// ── Bar color based on amplitude ─────────────────────────────
+function barColor(norm, isSelected) {
+  if (isSelected) {
+    // selected partial: green→yellow→red based on level
+    if (norm < 0.3) return `hsl(160,100%,${40 + norm*60}%)`;
+    if (norm < 0.7) return `hsl(${160 - (norm-0.3)*300},100%,55%)`;
+    return `hsl(${40 - (norm-0.7)*133},100%,55%)`;
+  }
+  // other partials: dim blue→cyan
+  if (norm < 0.5) return `rgba(0,150,255,${0.3 + norm * 0.6})`;
+  return `rgba(0,229,255,${0.5 + norm * 0.5})`;
+}
+
+// ── Update partial bar meters ────────────────────────────────
+function updatePartialBars(amps, fundamental) {
+  for (let n = 1; n <= 8; n++) {
+    const amp = Math.min(1, amps[n-1]);
+    const fill = barFills[n-1];
+    const pct = Math.round(amp * 100);
+    fill.style.height = pct + '%';
+    fill.style.background = barColor(amp, n === selectedHarmonic);
+    fill.style.color = barColor(amp, n === selectedHarmonic);
+
+    const freqHz = fundamental ? (fundamental * n).toFixed(0) + 'Hz' : '—';
+    const labelSpan = document.getElementById('plabel' + n);
+    if (labelSpan) labelSpan.textContent = freqHz;
+  }
+}
+
+// ── Colormap: black→blue→cyan→green→yellow→red ──────────────
+function spectralColor(norm) {
+  const n = Math.max(0, Math.min(1, norm));
+  let r, g, b;
+  if (n < 0.2)      { const t = n/0.2;       r=0;           g=0;              b=Math.round(180*t); }
+  else if (n < 0.4) { const t=(n-0.2)/0.2;   r=0;           g=Math.round(220*t); b=180; }
+  else if (n < 0.6) { const t=(n-0.4)/0.2;   r=0;           g=220;            b=Math.round(180*(1-t)); }
+  else if (n < 0.8) { const t=(n-0.6)/0.2;   r=Math.round(255*t); g=220;      b=0; }
+  else              { const t=(n-0.8)/0.2;    r=255;         g=Math.round(220*(1-t)); b=0; }
+  return [r, g, b];
+}
+
+// ── Spectrogram freq range ───────────────────────────────────
+function updateSgramFreqRange(fundamental) {
+  if (fundamental && fundamental > 20) {
+    sgramFreqMin = Math.max(20, fundamental * 0.85);
+    sgramFreqMax = fundamental * 8 * 1.12;
+    currentFundamental = fundamental;
+    sgramYaxis.innerHTML = '';
+    for (let n = 8; n >= 1; n--) {
+      const sp = document.createElement('span');
+      sp.textContent = `P${n} ${(fundamental*n).toFixed(0)}Hz`;
+      sgramYaxis.appendChild(sp);
+    }
+    freqRangeLabel.textContent = `${sgramFreqMin.toFixed(0)}〜${sgramFreqMax.toFixed(0)} Hz`;
+  }
+}
+
+// ── Draw spectrogram ─────────────────────────────────────────
+function drawSpectrogram(freqData, sampleRate, fftSize) {
+  const w = sgramCanvas.width, h = sgramCanvas.height;
+  const binHz = sampleRate / fftSize;
+  const numBins = freqData.length;
+  const minBin = Math.max(0, Math.floor(sgramFreqMin / binHz));
+  const maxBin = Math.min(numBins - 1, Math.ceil(sgramFreqMax / binHz));
+  const colBins = maxBin - minBin;
+  if (colBins <= 0) return;
+
+  const col = new Float32Array(colBins);
+  for (let i = 0; i < colBins; i++) col[i] = Math.max(0, (freqData[minBin + i] - 30) / 70);
+  sgramBuffer.push(col);
+  if (sgramBuffer.length > SGRAM_COLS) sgramBuffer.shift();
+
+  const colW = Math.max(1, w / SGRAM_COLS);
+  sgramCtx.fillStyle = '#000';
+  sgramCtx.fillRect(0, 0, w, h);
+
+  for (let ci = 0; ci < sgramBuffer.length; ci++) {
+    const col = sgramBuffer[ci];
+    const x = Math.round((ci / SGRAM_COLS) * w);
+    const cw = Math.max(1, Math.round(colW));
+    const imgData = sgramCtx.createImageData(cw, h);
+    const px = imgData.data;
+    for (let py = 0; py < h; py++) {
+      const freqFrac = 1 - (py / h);
+      const binIdx = freqFrac * (col.length - 1);
+      const b0 = Math.floor(binIdx), b1 = Math.min(col.length-1, b0+1);
+      const val = col[b0] * (1-(binIdx-b0)) + col[b1] * (binIdx-b0);
+      const [r, g, b] = spectralColor(val);
+      for (let dx = 0; dx < cw; dx++) {
+        const idx = (py * cw + dx) * 4;
+        px[idx]=r; px[idx+1]=g; px[idx+2]=b; px[idx+3]=255;
+      }
+    }
+    sgramCtx.putImageData(imgData, x, 0);
+  }
+
+  // horizontal partial lines
+  if (currentFundamental) {
+    for (let n = 1; n <= 8; n++) {
+      const freq = currentFundamental * n;
+      if (freq < sgramFreqMin || freq > sgramFreqMax) continue;
+      const freqFrac = (freq - sgramFreqMin) / (sgramFreqMax - sgramFreqMin);
+      const py = (1 - freqFrac) * h;
+      sgramCtx.strokeStyle = n === selectedHarmonic ? 'rgba(255,221,0,0.6)' : 'rgba(255,255,255,0.2)';
+      sgramCtx.lineWidth = n === selectedHarmonic ? 1.5 : 0.8;
+      sgramCtx.setLineDash(n === selectedHarmonic ? [] : [4,4]);
+      sgramCtx.beginPath(); sgramCtx.moveTo(0, py); sgramCtx.lineTo(w, py); sgramCtx.stroke();
+      sgramCtx.setLineDash([]);
+      sgramCtx.fillStyle = n === selectedHarmonic ? 'rgba(255,221,0,0.9)' : 'rgba(255,255,255,0.4)';
+      sgramCtx.font = `${Math.round(9*devicePixelRatio)}px monospace`;
+      sgramCtx.textAlign = 'right';
+      sgramCtx.fillText(`P${n}`, w-2, py-2);
+    }
+  }
+}
+
+// ── Draw FFT spectrum ────────────────────────────────────────
+function drawSpectrum(freqData, fundamental, sampleRate) {
+  const w = specCanvas.width, h = specCanvas.height;
+  specCtx.clearRect(0, 0, w, h);
+  const maxFreq = sgramFreqMax || 5000;
+  const binHz = sampleRate / (FFT_SIZE * 2);
+  const maxBin = Math.floor(maxFreq / binHz);
+  const barW = Math.max(1, w / maxBin);
+  for (let i = 0; i < maxBin; i++) {
+    const norm = Math.max(0, (freqData[i] - 40) / 60);
+    if (norm <= 0) continue;
+    const x = (i * binHz / maxFreq) * w;
+    specCtx.fillStyle = `rgba(0,229,255,${norm*0.6})`;
+    specCtx.fillRect(x, h - norm*h, barW, norm*h);
+  }
+  if (fundamental) {
+    specCtx.strokeStyle = '#00e5ff'; specCtx.lineWidth = 1.5*devicePixelRatio;
+    const x = (fundamental/maxFreq)*w;
+    specCtx.beginPath(); specCtx.moveTo(x,0); specCtx.lineTo(x,h); specCtx.stroke();
+  }
+  if (fundamental && selectedHarmonic) {
+    const hf = fundamental * selectedHarmonic;
+    specCtx.strokeStyle = '#ffdd00'; specCtx.lineWidth = 2*devicePixelRatio;
+    const x = (hf/maxFreq)*w;
+    specCtx.beginPath(); specCtx.moveTo(x,0); specCtx.lineTo(x,h); specCtx.stroke();
+  }
+}
+
+// ── Update peaks UI ──────────────────────────────────────────
+function updatePeaksUI(peaks, fundamental) {
+  peaksList.innerHTML = '';
+  if (!peaks.length) { peaksList.innerHTML = '<span style="color:var(--dim);font-family:var(--mono);font-size:0.65rem;">—</span>'; return; }
+  [...peaks].sort((a,b)=>a.freq-b.freq).slice(0,10).forEach(p => {
+    const chip = document.createElement('span');
+    chip.className = 'peak-chip';
+    if (fundamental && Math.abs(p.freq-fundamental)/fundamental < 0.02) chip.classList.add('fundamental');
+    if (fundamental && Math.abs(p.freq/fundamental - selectedHarmonic) < 0.03) chip.classList.add('selected-harm');
+    chip.textContent = `${p.freq.toFixed(1)}Hz`;
+    peaksList.appendChild(chip);
+  });
+}
+
+// ── Main loop ─────────────────────────────────────────────────
+let sgramThrottle = 0;
+function analyze() {
+  if (!isRunning) return;
+  animFrame = requestAnimationFrame(analyze);
+
+  const freqData = new Uint8Array(analyser.frequencyBinCount);
+  const timeData = new Uint8Array(analyser.fftSize);
+  analyser.getByteFrequencyData(freqData);
+  analyser.getByteTimeDomainData(timeData);
+  const sampleRate = audioCtx.sampleRate;
+
+  // RMS
+  let rms = 0;
+  for (let i = 0; i < timeData.length; i++) { const s=(timeData[i]-128)/128; rms+=s*s; }
+  rms = Math.sqrt(rms / timeData.length);
+
+  // Peaks & fundamental
+  const peaks = detectPeaks(freqData, sampleRate, FFT_SIZE*2);
+  const fundamental = findFundamental(peaks);
+
+  // Partial amplitudes for bar meters
+  const partialAmps = getPartialAmps(freqData, sampleRate, FFT_SIZE*2, fundamental);
+  updatePartialBars(partialAmps, fundamental);
+
+  // Note display
+  if (fundamental && rms > 0.01) {
+    const ni = freqToNote(fundamental);
+    noteNameEl.textContent = ni.name;
+    freqHzEl.textContent = fundamental.toFixed(2) + ' Hz';
+    freqCentsEl.textContent = (ni.cents>=0?'+':'') + ni.cents.toFixed(1) + ' cents';
+    freqCentsEl.style.color = Math.abs(ni.cents)<5?'var(--green)':Math.abs(ni.cents)<15?'var(--yellow)':'var(--red)';
+    updateSgramFreqRange(fundamental);
+  } else if (rms < 0.005) {
+    noteNameEl.textContent='—'; freqHzEl.textContent='— Hz'; freqCentsEl.textContent='± — cents';
+  }
+
+  // Beat
+  const beatHz = estimateBeatFFT(rms);
+  if (rms > 0.01) lastBeatHz = lastBeatHz*0.85 + beatHz*0.15;
+  else lastBeatHz = 0;
+  const db = lastBeatHz;
+  if (rms > 0.008) {
+    if (db < 0.08) { beatHzEl.textContent='0.0 beat/s'; beatHzEl.classList.add('zero'); }
+    else { beatHzEl.textContent=db.toFixed(1)+' beat/s'; beatHzEl.classList.remove('zero'); }
+  } else { beatHzEl.textContent='— beat/s'; beatHzEl.classList.remove('zero'); }
+
+  // Verdict
+  if (rms < 0.008) { verdictEl.className='verdict out'; verdictText.textContent='SIGNAL WAITING...'; }
+  else if (db < 0.08) { verdictEl.className='verdict in-tune'; verdictText.textContent='IN TUNE ✓'; }
+  else if (db < 1.5) { verdictEl.className='verdict close'; verdictText.textContent=`BEAT ${db.toFixed(1)}/s — CLOSE`; }
+  else { verdictEl.className='verdict out'; verdictText.textContent=`BEAT ${db.toFixed(1)}/s — ADJUST`; }
+
+  // Spectrogram ~20fps
+  sgramThrottle++;
+  if (sgramThrottle >= 3) { sgramThrottle=0; drawSpectrogram(freqData, sampleRate, FFT_SIZE*2); }
+
+  drawSpectrum(freqData, fundamental, sampleRate);
+  updatePeaksUI(peaks, fundamental);
+}
+
+// ── Mic ──────────────────────────────────────────────────────
+micBtn.addEventListener('click', async () => { isRunning ? stopMic() : await startMic(); });
+
+async function startMic() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }, video:false });
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)({ sampleRate:44100 });
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = FFT_SIZE*2;
+    analyser.smoothingTimeConstant = 0.5;
+    analyser.minDecibels = -90; analyser.maxDecibels = -10;
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    isRunning = true;
+    micBtn.textContent='■ MIC OFF'; micBtn.classList.add('active');
+    statusText.textContent='解析中... ピアノを弾いてください';
+    resizeCanvases(); analyze();
+  } catch(e) { statusText.textContent='マイクアクセス拒否: '+e.message; }
+}
+
+function stopMic() {
+  isRunning = false; cancelAnimationFrame(animFrame);
+  if (micStream) micStream.getTracks().forEach(t=>t.stop());
+  if (audioCtx) audioCtx.close();
+  micBtn.textContent='▶ MIC ON'; micBtn.classList.remove('active');
+  statusText.textContent='マイクをオンにして調律を開始';
+  noteNameEl.textContent='—'; freqHzEl.textContent='— Hz'; freqCentsEl.textContent='± — cents';
+  beatHzEl.textContent='— beat/s';
+  verdictEl.className='verdict out'; verdictText.textContent='SIGNAL WAITING...';
+  ampHistory2=[]; lastBeatHz=0; sgramBuffer=[]; currentFundamental=null;
+  sgramCtx.clearRect(0,0,sgramCanvas.width,sgramCanvas.height);
+  sgramYaxis.innerHTML=''; freqRangeLabel.textContent='基音〜第8倍音';
+  barFills.forEach(f=>{ f.style.height='0%'; f.style.background='var(--dim)'; });
+}
+</script>
+
+</body>
+</html>
