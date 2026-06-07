@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mic Test</title>
+<style>
+body { background:#111; color:#fff; font-family:monospace; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; gap:16px; padding:20px; }
+button { font-size:1.1rem; padding:14px 28px; background:#00e5ff; color:#000; border:none; border-radius:6px; cursor:pointer; width:200px; }
+#bar-wrap { width:100%; max-width:400px; background:#333; height:30px; border-radius:4px; overflow:hidden; }
+#bar { height:100%; width:0%; background:#00ff88; }
+#log { width:100%; max-width:400px; background:#1a1a1a; padding:12px; border-radius:6px; font-size:0.75rem; line-height:1.9; white-space:pre-wrap; max-height:50vh; overflow-y:auto; }
+</style>
+</head>
+<body>
+<h2>🎤 Mic Test v2</h2>
+<button id="btn">START</button>
+<div id="bar-wrap"><div id="bar"></div></div>
+<div id="log">待機中...</div>
+<script>
+const btn = document.getElementById('btn');
+const bar = document.getElementById('bar');
+const logEl = document.getElementById('log');
+let running = false, ctx = null, processor = null, stream = null;
+
+function log(t) { logEl.textContent += ‘\n’ + t; logEl.scrollTop = logEl.scrollHeight; }
+
+btn.addEventListener(‘click’, async () => {
+if (running) {
+running = false;
+if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
+if (stream) stream.getTracks().forEach(t => t.stop());
+if (ctx) ctx.close();
+btn.textContent = ‘START’;
+log(‘停止’);
+return;
+}
+
+log(’— 開始 —’);
+
+// 1. AudioContext
+try {
+ctx = new (window.AudioContext || window.webkitAudioContext)();
+log(‘AudioContext: state=’ + ctx.state + ’ sr=’ + ctx.sampleRate);
+} catch(e) { log(’AudioContext失敗: ’ + e); return; }
+
+if (ctx.state !== ‘running’) {
+await ctx.resume();
+log(’resume後: ’ + ctx.state);
+}
+
+// 2. マイク
+try {
+stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+log(‘マイクOK トラック=’ + stream.getAudioTracks().length);
+const t = stream.getAudioTracks()[0];
+log(‘ラベル: ’ + t.label);
+const s = t.getSettings();
+log(‘設定: sr=’ + s.sampleRate + ’ ch=’ + s.channelCount);
+} catch(e) { log(’マイク失敗: ’ + e); return; }
+
+// 3. ScriptProcessorで音声データを取得
+const src = ctx.createMediaStreamSource(stream);
+const bufSize = 4096;
+processor = ctx.createScriptProcessor(bufSize, 1, 1);
+let frameCount = 0;
+
+processor.onaudioprocess = (e) => {
+const input = e.inputBuffer.getChannelData(0);
+let rms = 0;
+for (let i = 0; i < input.length; i++) rms += input[i] * input[i];
+rms = Math.sqrt(rms / input.length);
+
+```
+const pct = Math.min(100, rms * 600);
+bar.style.width = pct + '%';
+bar.style.background = pct > 60 ? '#ff3355' : pct > 20 ? '#ffdd00' : '#00ff88';
+
+frameCount++;
+if (frameCount % 15 === 0) {
+  log('RMS=' + rms.toFixed(5) + ' max=' + Math.max(...Array.from(input).map(Math.abs)).toFixed(4));
+}
+```
+
+};
+
+src.connect(processor);
+processor.connect(ctx.destination); // iOSではdestination接続が必要
+
+running = true;
+btn.textContent = ‘STOP’;
+log(‘解析中… ピアノを弾いてください’);
+});
+</script>
+
+</body>
+</html>
