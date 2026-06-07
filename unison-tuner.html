@@ -388,13 +388,25 @@ micBtn.addEventListener(‘click’,async()=>{isRunning?stopMic():await startMic
 
 async function startMic(){
 try{
+audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+if(audioCtx.state===‘suspended’) await audioCtx.resume();
 micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
-audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:44100});
 analyser=audioCtx.createAnalyser();
 analyser.fftSize=FFT_SIZE;
 analyser.smoothingTimeConstant=0.6;
 analyser.minDecibels=-100;analyser.maxDecibels=-10;
-audioCtx.createMediaStreamSource(micStream).connect(analyser);
+const source=audioCtx.createMediaStreamSource(micStream);
+source.connect(analyser);
+// ScriptProcessor for iOS 26 - keeps AudioContext alive
+const proc=audioCtx.createScriptProcessor(2048,1,1);
+proc.onaudioprocess=(e)=>{
+if(!isRunning)return;
+const d=e.inputBuffer.getChannelData(0);
+if(!window._pcm||window._pcm.length!==d.length)window._pcm=new Float32Array(d.length);
+window._pcm.set(d);
+};
+source.connect(proc);
+proc.connect(audioCtx.destination);
 isRunning=true;
 micBtn.textContent=‘■ MIC OFF’;micBtn.classList.add(‘active’);
 statusText.textContent=‘解析中… ピアノを弾いてください’;
