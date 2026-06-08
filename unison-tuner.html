@@ -19,65 +19,59 @@
     min-height: 100vh; display: flex; flex-direction: column; align-items: center;
     padding: 16px 12px 40px; overflow-x: hidden;
   }
-  body::before {
-    content: ''; position: fixed; inset: 0;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
-    pointer-events: none; z-index: 999;
-  }
   header { width: 100%; max-width: 700px; display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
   header h1 { font-family: var(--mono); font-size: 1.05rem; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; }
   header span { font-size: 0.68rem; color: var(--dim); letter-spacing: 0.1em; }
   .main-grid { width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 12px; }
-  .status-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
-  #mic-btn { font-family: var(--mono); font-size: 0.73rem; letter-spacing: 0.1em; background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 6px 14px; border-radius: 2px; cursor: pointer; transition: background 0.2s, color 0.2s; text-transform: uppercase; }
-  #mic-btn:hover { background: var(--accent); color: var(--bg); }
-  #mic-btn.active { background: var(--red); border-color: var(--red); color: #fff; }
-  #status-text { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); flex: 1; }
-  .note-display { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
-  .note-name { font-family: var(--mono); font-size: 2.6rem; color: var(--accent); line-height: 1; min-width: 90px; }
-  .freq-info { text-align: right; }
-  .freq-hz { font-family: var(--mono); font-size: 1.3rem; color: var(--text); }
-  .freq-cents { font-family: var(--mono); font-size: 0.75rem; color: var(--dim); margin-top: 4px; }
-  .harmonic-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; flex-wrap: wrap; }
-  .harmonic-row label { font-size: 0.68rem; color: var(--dim); letter-spacing: 0.08em; font-family: var(--mono); white-space: nowrap; }
-  .harm-btns { display: flex; gap: 5px; flex-wrap: wrap; }
-  .harm-btn { font-family: var(--mono); font-size: 0.72rem; width: 36px; height: 30px; background: transparent; border: 1px solid var(--border); color: var(--dim); border-radius: 2px; cursor: pointer; transition: all 0.15s; }
-  .harm-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .harm-btn.selected { background: var(--yellow); border-color: var(--yellow); color: #000; font-weight: bold; }
-  .beat-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
-  .beat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-  .beat-label { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; }
-  #beat-hz { font-family: var(--mono); font-size: 1.05rem; color: var(--yellow); transition: color 0.3s; }
-  #beat-hz.zero { color: var(--green); }
-  #beat-canvas { width: 100%; height: 80px; display: block; border-radius: 2px; background: #0d0f14; }
-  .verdict { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; transition: border-color 0.4s; }
-  .verdict.in-tune { border-color: var(--green); }
-  .verdict.close   { border-color: var(--yellow); }
-  .verdict.out     { border-color: var(--red); }
-  .verdict-dot { width: 20px; height: 20px; border-radius: 50%; background: var(--dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
-  .verdict.in-tune .verdict-dot { background: var(--green); box-shadow: 0 0 18px var(--green); }
-  .verdict.close   .verdict-dot { background: var(--yellow); box-shadow: 0 0 12px var(--yellow); }
-  .verdict.out     .verdict-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
-  .verdict-text { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.12em; color: var(--dim); transition: color 0.3s; }
-  .verdict.in-tune .verdict-text { color: var(--green); }
-  .verdict.close   .verdict-text { color: var(--yellow); }
-  .verdict.out     .verdict-text { color: var(--red); }
-  .spectrogram-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
-  .spectrogram-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 4px; }
-  .section-label { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; }
-  .freq-range-label { font-family: var(--mono); font-size: 0.62rem; color: var(--dim); }
-  .spectrogram-wrap { position: relative; }
-  #sgram-canvas { width: 100%; height: 240px; display: block; border-radius: 2px; background: #000; }
-  .sgram-yaxis { position: absolute; right: 4px; top: 0; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 4px 0; pointer-events: none; }
-  .sgram-yaxis span { font-family: var(--mono); font-size: 0.5rem; color: rgba(255,255,255,0.45); background: rgba(0,0,0,0.6); padding: 1px 4px; border-radius: 2px; line-height: 1.3; text-align: right; }
-  .sgram-yaxis span.sel { color: var(--yellow); font-weight: bold; }
-  .sgram-yaxis span.intune { color: var(--green); font-weight: bold; }
-  .peaks-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; }
-  #peaks-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .peak-chip { font-family: var(--mono); font-size: 0.62rem; padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px; color: var(--text); }
-  .peak-chip.fundamental { border-color: var(--accent); color: var(--accent); }
-  .peak-chip.selected-harm { border-color: var(--yellow); color: var(--yellow); }
+
+.status-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
+#mic-btn { font-family: var(–mono); font-size: 0.73rem; letter-spacing: 0.1em; background: transparent; border: 1px solid var(–accent); color: var(–accent); padding: 6px 14px; border-radius: 2px; cursor: pointer; transition: background 0.2s, color 0.2s; text-transform: uppercase; }
+#mic-btn:hover { background: var(–accent); color: var(–bg); }
+#mic-btn.active { background: var(–red); border-color: var(–red); color: #fff; }
+#status-text { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); flex: 1; }
+
+.note-display { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
+.note-name { font-family: var(–mono); font-size: 3rem; color: var(–accent); line-height: 1; min-width: 90px; }
+.freq-info { text-align: right; }
+.freq-hz { font-family: var(–mono); font-size: 1.4rem; color: var(–text); }
+.freq-cents { font-family: var(–mono); font-size: 0.78rem; color: var(–dim); margin-top: 4px; }
+
+.harmonic-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; flex-wrap: wrap; }
+.harmonic-row label { font-size: 0.68rem; color: var(–dim); font-family: var(–mono); white-space: nowrap; }
+.harm-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+.harm-btn { font-family: var(–mono); font-size: 0.72rem; width: 36px; height: 30px; background: transparent; border: 1px solid var(–border); color: var(–dim); border-radius: 2px; cursor: pointer; transition: all 0.15s; }
+.harm-btn:hover { border-color: var(–accent); color: var(–accent); }
+.harm-btn.selected { background: var(–yellow); border-color: var(–yellow); color: #000; font-weight: bold; }
+
+.verdict { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; transition: border-color 0.4s; }
+.verdict.in-tune { border-color: var(–green); }
+.verdict.close   { border-color: var(–yellow); }
+.verdict.out     { border-color: var(–red); }
+.verdict-dot { width: 20px; height: 20px; border-radius: 50%; background: var(–dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
+.verdict.in-tune .verdict-dot { background: var(–green); box-shadow: 0 0 18px var(–green); }
+.verdict.close   .verdict-dot { background: var(–yellow); box-shadow: 0 0 12px var(–yellow); }
+.verdict.out     .verdict-dot { background: var(–red); box-shadow: 0 0 8px var(–red); }
+.verdict-text { font-family: var(–mono); font-size: 0.82rem; letter-spacing: 0.12em; color: var(–dim); transition: color 0.3s; }
+.verdict.in-tune .verdict-text { color: var(–green); }
+.verdict.close   .verdict-text { color: var(–yellow); }
+.verdict.out     .verdict-text { color: var(–red); }
+#beat-disp { font-family: var(–mono); font-size: 0.9rem; color: var(–yellow); }
+#beat-disp.zero { color: var(–green); }
+
+/* FFT Spectrum */
+.spectrum-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
+.spectrum-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.section-label { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; }
+.freq-range-label { font-family: var(–mono); font-size: 0.62rem; color: var(–dim); }
+#spectrum-canvas { width: 100%; height: 280px; display: block; border-radius: 2px; background: #000; }
+
+.peaks-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 10px 14px; }
+#peaks-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.peak-chip { font-family: var(–mono); font-size: 0.62rem; padding: 2px 6px; border: 1px solid var(–border); border-radius: 2px; color: var(–text); }
+.peak-chip.fundamental { border-color: var(–accent); color: var(–accent); }
+.peak-chip.selected-harm { border-color: var(–yellow); color: var(–yellow); }
 </style>
+
 </head>
 <body>
 <header>
@@ -85,10 +79,12 @@
   <span>PIANO · 2-STRING BEAT DETECTOR</span>
 </header>
 <div class="main-grid">
+
   <div class="status-bar">
     <button id="mic-btn">▶ MIC ON</button>
     <span id="status-text">マイクをオンにして調律を開始</span>
   </div>
+
   <div class="note-display">
     <div class="note-name" id="note-name">—</div>
     <div class="freq-info">
@@ -96,72 +92,64 @@
       <div class="freq-cents" id="freq-cents">± — cents</div>
     </div>
   </div>
+
   <div class="harmonic-row">
     <label>倍音選択：</label>
     <div class="harm-btns" id="harm-btns"></div>
   </div>
-  <div class="beat-section">
-    <div class="beat-header">
-      <span class="beat-label">BEAT WAVEFORM</span>
-      <span id="beat-hz">— beat/s</span>
-    </div>
-    <canvas id="beat-canvas"></canvas>
-  </div>
+
   <div class="verdict out" id="verdict">
     <div class="verdict-dot"></div>
     <span class="verdict-text" id="verdict-text">SIGNAL WAITING...</span>
+    <span id="beat-disp">—</span>
   </div>
-  <div class="spectrogram-section">
-    <div class="spectrogram-header">
-      <span class="section-label">SPECTROGRAM</span>
+
+  <!-- FFT Spectrum with partial lines -->
+
+  <div class="spectrum-section">
+    <div class="spectrum-header">
+      <span class="section-label">FFT SPECTRUM</span>
       <span class="freq-range-label" id="freq-range-label">基音〜第8倍音</span>
     </div>
-    <div class="spectrogram-wrap">
-      <canvas id="sgram-canvas"></canvas>
-      <div class="sgram-yaxis" id="sgram-yaxis"></div>
-    </div>
+    <canvas id="spectrum-canvas"></canvas>
   </div>
+
   <div class="peaks-section">
     <div class="section-label">DETECTED PARTIALS</div>
     <div id="peaks-list"><span style="color:var(--dim);font-family:var(--mono);font-size:0.62rem;">—</span></div>
   </div>
+
 </div>
 <script>
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const A4_FREQ = 440.0;
 const FFT_SIZE = 8192;
-const SGRAM_COLS = 300;
 
 let audioCtx=null, analyser=null, micStream=null;
 let isRunning=false, selectedHarmonic=4;
-let lastBeatHz=0, animFrame=null;
-let ampHistory2=[], sgramBuffer=[];
-let currentFundamental=null;
-let sgramFreqMin=0, sgramFreqMax=5000;
-let sgramThrottle=0, smoothBeat=0;
+let lastBeatHz=0, animFrame=null, smoothBeat=0;
+let ampHistory=[], currentFundamental=null;
+let fMin=50, fMax=4000, sgramThrottle=0;
 
-const micBtn=document.getElementById(‘mic-btn’);
-const statusText=document.getElementById(‘status-text’);
-const noteNameEl=document.getElementById(‘note-name’);
-const freqHzEl=document.getElementById(‘freq-hz’);
-const freqCentsEl=document.getElementById(‘freq-cents’);
-const beatHzEl=document.getElementById(‘beat-hz’);
-const verdictEl=document.getElementById(‘verdict’);
-const verdictText=document.getElementById(‘verdict-text’);
-const peaksList=document.getElementById(‘peaks-list’);
-const freqRangeLabel=document.getElementById(‘freq-range-label’);
-const sgramYaxis=document.getElementById(‘sgram-yaxis’);
-const beatCanvas=document.getElementById(‘beat-canvas’);
-const beatCtx=beatCanvas.getContext(‘2d’);
-const sgramCanvas=document.getElementById(‘sgram-canvas’);
-const sgramCtx=sgramCanvas.getContext(‘2d’);
+const micBtn        = document.getElementById(‘mic-btn’);
+const statusText    = document.getElementById(‘status-text’);
+const noteNameEl    = document.getElementById(‘note-name’);
+const freqHzEl      = document.getElementById(‘freq-hz’);
+const freqCentsEl   = document.getElementById(‘freq-cents’);
+const verdictEl     = document.getElementById(‘verdict’);
+const verdictText   = document.getElementById(‘verdict-text’);
+const beatDisp      = document.getElementById(‘beat-disp’);
+const peaksList     = document.getElementById(‘peaks-list’);
+const freqRangeLabel= document.getElementById(‘freq-range-label’);
+const specCanvas    = document.getElementById(‘spectrum-canvas’);
+const specCtx       = specCanvas.getContext(‘2d’);
 
-const harmBtnsEl=document.getElementById(‘harm-btns’);
-function updateHarmonicUI(){
+// ── Harmonic buttons ─────────────────────────────────────────
+const harmBtnsEl = document.getElementById(‘harm-btns’);
+function updateHarmonicUI() {
 document.querySelectorAll(’.harm-btn’).forEach((b,i)=>{
-if(i+1===selectedHarmonic)b.classList.add(‘selected’);else b.classList.remove(‘selected’);
+if(i+1===selectedHarmonic) b.classList.add(‘selected’); else b.classList.remove(‘selected’);
 });
-updateSgramYaxis();
 }
 for(let i=1;i<=8;i++){
 const b=document.createElement(‘button’);
@@ -171,14 +159,12 @@ b.addEventListener(‘click’,()=>{selectedHarmonic=i;updateHarmonicUI();});
 harmBtnsEl.appendChild(b);
 }
 
-function resizeCanvases(){
-[beatCanvas,sgramCanvas].forEach(c=>{
-c.width=c.offsetWidth*devicePixelRatio;
-c.height=c.offsetHeight*devicePixelRatio;
-});
+function resizeCanvas(){
+specCanvas.width=specCanvas.offsetWidth*devicePixelRatio;
+specCanvas.height=specCanvas.offsetHeight*devicePixelRatio;
 }
-window.addEventListener(‘resize’,()=>{resizeCanvases();sgramBuffer=[];});
-resizeCanvases();
+window.addEventListener(‘resize’,resizeCanvas);
+resizeCanvas();
 
 function freqToNote(freq){
 if(freq<=0)return{name:’—’,cents:0};
@@ -187,7 +173,10 @@ return{name:NOTE_NAMES[((midiR%12)+12)%12]+(Math.floor(midiR/12)-1),cents:(midi-
 }
 
 function detectPeaks(freqData,sampleRate,fftSize,topN=16){
-const binHz=sampleRate/fftSize,minBin=Math.floor(20/binHz),maxBin=Math.min(freqData.length-3,Math.floor(8000/binHz)),peaks=[];
+const binHz=sampleRate/fftSize;
+const minBin=Math.floor(20/binHz);
+const maxBin=Math.min(freqData.length-3,Math.floor(8000/binHz));
+const peaks=[];
 for(let i=minBin+2;i<maxBin-2;i++){
 const v=freqData[i];
 if(v>freqData[i-1]&&v>freqData[i-2]&&v>freqData[i+1]&&v>freqData[i+2]&&v>20){
@@ -201,132 +190,96 @@ return peaks.sort((a,b)=>b.amp-a.amp).slice(0,topN);
 function findFundamental(peaks){
 if(!peaks.length)return null;
 let bestFund=null,bestScore=-1;
-for(const p of peaks.slice(0,6)){
-const f0=p.freq;if(f0<20||f0>4000)continue;
+for(const p of peaks.slice(0,8)){
+const f0=p.freq;if(f0<20||f0>4200)continue;
 let score=p.amp;
-for(const q of peaks){const ratio=q.freq/f0,n=Math.round(ratio);if(n>=2&&n<=8&&Math.abs(ratio-n)/n<0.02)score+=q.amp*0.5;}
+for(const q of peaks){const r=q.freq/f0,n=Math.round(r);if(n>=2&&n<=8&&Math.abs(r-n)/n<0.025)score+=q.amp*0.5;}
 if(score>bestScore){bestScore=score;bestFund=f0;}
 }
 return bestFund;
 }
 
-function estimateBeatFFT(rmsVal){
-ampHistory2.push(rmsVal);
-if(ampHistory2.length>2048)ampHistory2.shift();
-if(ampHistory2.length<256)return 0;
-const N=Math.min(ampHistory2.length,512),slice=ampHistory2.slice(-N);
-const mean=slice.reduce((a,b)=>a+b,0)/N;
-let crossings=0;
-for(let i=1;i<slice.length;i++)if((slice[i]-mean)*(slice[i-1]-mean)<0)crossings++;
-const bHz=(crossings/2)/(N/60);
-return bHz>0.1&&bHz<25?bHz:0;
+function estimateBeat(rms){
+ampHistory.push(rms);
+if(ampHistory.length>1024)ampHistory.shift();
+if(ampHistory.length<128)return 0;
+const N=Math.min(ampHistory.length,512),sl=ampHistory.slice(-N);
+const mn=sl.reduce((a,b)=>a+b,0)/N;
+let c=0;
+for(let i=1;i<sl.length;i++)if((sl[i]-mn)*(sl[i-1]-mn)<0)c++;
+const b=(c/2)/(N/60);
+return b>0.08&&b<20?b:0;
 }
 
-function selectedLineColor(beat){
-if(beat<0.08)return{stroke:‘rgba(0,255,136,0.95)’,glow:‘rgba(0,255,136,0.35)’,cls:‘intune’};
-if(beat<1.5)return{stroke:‘rgba(255,221,0,0.95)’,glow:‘rgba(255,221,0,0.3)’,cls:‘sel’};
-return{stroke:‘rgba(255,51,85,0.95)’,glow:‘rgba(255,51,85,0.3)’,cls:‘sel’};
+// ── Selected partial line color ───────────────────────────────
+function lineColor(beat){
+if(beat<0.08)return{stroke:‘rgba(0,255,136,1)’,  glow:‘rgba(0,255,136,0.5)’};
+if(beat<1.5) return{stroke:‘rgba(255,221,0,1)’,  glow:‘rgba(255,221,0,0.45)’};
+return             {stroke:‘rgba(255,51,85,1)’,   glow:‘rgba(255,51,85,0.45)’};
 }
 
-function drawBeatWave(beatHz){
-const w=beatCanvas.width,h=beatCanvas.height;
-beatCtx.clearRect(0,0,w,h);
-const color=beatHz<0.05?’#00ff88’:beatHz<1.5?’#ffdd00’:’#ff3355’;
-beatCtx.strokeStyle=color;
-beatCtx.lineWidth=1.5*devicePixelRatio;
-beatCtx.beginPath();
-const now=performance.now()/1000,pts=300;
-for(let i=0;i<=pts;i++){
-const t=i/pts,x=t*w;
-const beatMod=beatHz>0?0.5+0.5*Math.cos(2*Math.PI*beatHz*(now+t*2)):1.0;
-const carrier=Math.sin(2*Math.PI*4*(now*0.5+t*3));
-const y=h/2+(h*0.38)*beatMod*carrier;
-i===0?beatCtx.moveTo(x,y):beatCtx.lineTo(x,y);
-}
-beatCtx.stroke();
-}
+// ── Draw FFT spectrum with partial lines ──────────────────────
+function drawSpectrum(freqData,sampleRate,fftSize){
+const w=specCanvas.width,h=specCanvas.height;
+specCtx.fillStyle=’#000’;specCtx.fillRect(0,0,w,h);
 
-function updateSgramYaxis(){
-sgramYaxis.innerHTML=’’;
-if(!currentFundamental)return;
-const col=selectedLineColor(smoothBeat);
-for(let n=8;n>=1;n–){
-const sp=document.createElement(‘span’);
-sp.textContent=`P${n} ${(currentFundamental*n).toFixed(0)}`;
-if(n===selectedHarmonic)sp.className=col.cls;
-sgramYaxis.appendChild(sp);
-}
-}
-
-function updateSgramFreqRange(fundamental){
-if(!fundamental||fundamental<=20)return;
-sgramFreqMin=Math.max(20,fundamental*0.85);
-sgramFreqMax=fundamental*8*1.12;
-currentFundamental=fundamental;
-freqRangeLabel.textContent=`${sgramFreqMin.toFixed(0)}〜${sgramFreqMax.toFixed(0)} Hz`;
-updateSgramYaxis();
-}
-
-function spectralColor(norm){
-const n=Math.max(0,Math.min(1,norm));
-let r,g,b;
-if(n<0.2){const t=n/0.2;r=0;g=0;b=Math.round(180*t);}
-else if(n<0.4){const t=(n-0.2)/0.2;r=0;g=Math.round(220*t);b=180;}
-else if(n<0.6){const t=(n-0.4)/0.2;r=0;g=220;b=Math.round(180*(1-t));}
-else if(n<0.8){const t=(n-0.6)/0.2;r=Math.round(255*t);g=220;b=0;}
-else{const t=(n-0.8)/0.2;r=255;g=Math.round(220*(1-t));b=0;}
-return[r,g,b];
-}
-
-function drawSpectrogram(freqData,sampleRate,fftSize){
-const w=sgramCanvas.width,h=sgramCanvas.height;
 const binHz=sampleRate/fftSize;
-const minBin=Math.max(0,Math.floor(sgramFreqMin/binHz));
-const maxBin=Math.min(freqData.length-1,Math.ceil(sgramFreqMax/binHz));
-const colBins=maxBin-minBin;if(colBins<=0)return;
-const col=new Float32Array(colBins);
-for(let i=0;i<colBins;i++)col[i]=Math.max(0,(freqData[minBin+i]-30)/70);
-sgramBuffer.push(col);if(sgramBuffer.length>SGRAM_COLS)sgramBuffer.shift();
-sgramCtx.fillStyle=’#000’;sgramCtx.fillRect(0,0,w,h);
-const colW=Math.max(1,w/SGRAM_COLS);
-for(let ci=0;ci<sgramBuffer.length;ci++){
-const c=sgramBuffer[ci];
-const x=Math.round((ci/SGRAM_COLS)*w);
-const cw=Math.max(1,Math.round(colW));
-const imgData=sgramCtx.createImageData(cw,h);
-const px=imgData.data;
-for(let py=0;py<h;py++){
-const ff=1-(py/h),bi=ff*(c.length-1),b0=Math.floor(bi),b1=Math.min(c.length-1,b0+1);
-const val=c[b0]*(1-(bi-b0))+c[b1]*(bi-b0);
-const[r,g,b]=spectralColor(val);
-for(let dx=0;dx<cw;dx++){const idx=(py*cw+dx)*4;px[idx]=r;px[idx+1]=g;px[idx+2]=b;px[idx+3]=255;}
+const maxFreq=fMax||5000;
+const maxBin=Math.min(freqData.length-1,Math.ceil(maxFreq/binHz));
+
+// Grid lines
+specCtx.strokeStyle=‘rgba(30,35,48,0.8)’;specCtx.lineWidth=1;
+for(let f=500;f<=maxFreq;f+=500){
+const x=(f/maxFreq)*w;
+specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
 }
-sgramCtx.putImageData(imgData,x,0);
+
+// Spectrum bars
+for(let i=0;i<maxBin;i++){
+const norm=Math.max(0,(freqData[i]-20)/80);
+if(norm<=0)continue;
+const x=(i*binHz/maxFreq)*w;
+const bw=Math.max(1,w/maxBin);
+specCtx.fillStyle=`rgba(0,229,255,${norm*0.7})`;
+specCtx.fillRect(x,h-norm*h,bw,norm*h);
 }
+
+// Partial guide lines
 if(currentFundamental){
-const selCol=selectedLineColor(smoothBeat);
+const lc=lineColor(smoothBeat);
 for(let n=1;n<=8;n++){
 const freq=currentFundamental*n;
-if(freq<sgramFreqMin||freq>sgramFreqMax)continue;
-const freqFrac=(freq-sgramFreqMin)/(sgramFreqMax-sgramFreqMin);
-const py=(1-freqFrac)*h;
+if(freq<=0||freq>maxFreq)continue;
+const x=(freq/maxFreq)*w;
 const isSel=n===selectedHarmonic;
 if(isSel){
-sgramCtx.save();
-sgramCtx.strokeStyle=selCol.glow;sgramCtx.lineWidth=10*devicePixelRatio;
-sgramCtx.shadowBlur=14*devicePixelRatio;sgramCtx.shadowColor=selCol.stroke;
-sgramCtx.beginPath();sgramCtx.moveTo(0,py);sgramCtx.lineTo(w,py);sgramCtx.stroke();
-sgramCtx.strokeStyle=selCol.stroke;sgramCtx.lineWidth=3*devicePixelRatio;sgramCtx.shadowBlur=0;
-sgramCtx.beginPath();sgramCtx.moveTo(0,py);sgramCtx.lineTo(w,py);sgramCtx.stroke();
-sgramCtx.restore();
+// thick glowing line for selected partial
+specCtx.save();
+specCtx.strokeStyle=lc.glow;
+specCtx.lineWidth=16*devicePixelRatio;
+specCtx.shadowBlur=20*devicePixelRatio;
+specCtx.shadowColor=lc.stroke;
+specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
+specCtx.strokeStyle=lc.stroke;
+specCtx.lineWidth=4*devicePixelRatio;
+specCtx.shadowBlur=0;
+specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
+specCtx.restore();
+// label
+specCtx.fillStyle=lc.stroke;
+specCtx.font=`bold ${Math.round(11*devicePixelRatio)}px monospace`;
+specCtx.textAlign=‘center’;
+specCtx.fillText(`P${n}`,x,20*devicePixelRatio);
 } else {
-sgramCtx.strokeStyle=‘rgba(255,255,255,0.22)’;sgramCtx.lineWidth=1.5*devicePixelRatio;
-sgramCtx.setLineDash([5,5]);
-sgramCtx.beginPath();sgramCtx.moveTo(0,py);sgramCtx.lineTo(w,py);sgramCtx.stroke();
-sgramCtx.setLineDash([]);
-sgramCtx.fillStyle=‘rgba(255,255,255,0.35)’;
-sgramCtx.font=`${Math.round(8*devicePixelRatio)}px monospace`;
-sgramCtx.textAlign=‘left’;sgramCtx.fillText(`P${n}`,4,py-3);
+specCtx.strokeStyle=‘rgba(255,255,255,0.25)’;
+specCtx.lineWidth=1.5*devicePixelRatio;
+specCtx.setLineDash([4,5]);
+specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
+specCtx.setLineDash([]);
+specCtx.fillStyle=‘rgba(255,255,255,0.4)’;
+specCtx.font=`${Math.round(9*devicePixelRatio)}px monospace`;
+specCtx.textAlign=‘center’;
+specCtx.fillText(`P${n}`,x,20*devicePixelRatio);
 }
 }
 }
@@ -351,37 +304,52 @@ const timeData=new Uint8Array(analyser.fftSize);
 analyser.getByteFrequencyData(freqData);
 analyser.getByteTimeDomainData(timeData);
 const sampleRate=audioCtx.sampleRate;
+
+// RMS from ScriptProcessor if available, else timeData
 let rms=0;
+if(window._pcm){
+for(let i=0;i<window._pcm.length;i++)rms+=window._pcm[i]*window._pcm[i];
+rms=Math.sqrt(rms/window._pcm.length);
+} else {
 for(let i=0;i<timeData.length;i++){const s=(timeData[i]-128)/128;rms+=s*s;}
 rms=Math.sqrt(rms/timeData.length);
+}
+
 const peaks=detectPeaks(freqData,sampleRate,FFT_SIZE);
 const fundamental=findFundamental(peaks);
+
 if(fundamental&&rms>0.0005){
+currentFundamental=fundamental;
+fMin=Math.max(20,fundamental*0.5);
+fMax=fundamental*8.5;
 const ni=freqToNote(fundamental);
 noteNameEl.textContent=ni.name;
 freqHzEl.textContent=fundamental.toFixed(2)+’ Hz’;
 freqCentsEl.textContent=(ni.cents>=0?’+’:’’)+ni.cents.toFixed(1)+’ cents’;
 freqCentsEl.style.color=Math.abs(ni.cents)<5?‘var(–green)’:Math.abs(ni.cents)<15?‘var(–yellow)’:‘var(–red)’;
-updateSgramFreqRange(fundamental);
-} else if(rms<0.002){
+freqRangeLabel.textContent=`${fMin.toFixed(0)}〜${fMax.toFixed(0)} Hz`;
+} else if(rms<0.0002){
 noteNameEl.textContent=’—’;freqHzEl.textContent=’— Hz’;freqCentsEl.textContent=‘± — cents’;
 }
-const beatHz=estimateBeatFFT(rms);
-if(rms>0.0005)lastBeatHz=lastBeatHz*0.85+beatHz*0.15;else lastBeatHz=0;
-smoothBeat=lastBeatHz;const db=smoothBeat;
+
+const beatHz=estimateBeat(rms);
+if(rms>0.0005) lastBeatHz=lastBeatHz*0.85+beatHz*0.15; else lastBeatHz*=0.95;
+smoothBeat=lastBeatHz;
+const db=smoothBeat;
+
 if(rms>0.0005){
-if(db<0.08){beatHzEl.textContent=‘0.0 beat/s’;beatHzEl.classList.add(‘zero’);}
-else{beatHzEl.textContent=db.toFixed(1)+’ beat/s’;beatHzEl.classList.remove(‘zero’);}
-}else{beatHzEl.textContent=’— beat/s’;beatHzEl.classList.remove(‘zero’);}
+if(db<0.08){beatDisp.textContent=‘0.0 beat/s’;beatDisp.classList.add(‘zero’);}
+else{beatDisp.textContent=db.toFixed(1)+’ beat/s’;beatDisp.classList.remove(‘zero’);}
+} else {beatDisp.textContent=’—’;beatDisp.classList.remove(‘zero’);}
+
 if(rms<0.0005){verdictEl.className=‘verdict out’;verdictText.textContent=‘SIGNAL WAITING…’;}
 else if(db<0.08){verdictEl.className=‘verdict in-tune’;verdictText.textContent=‘IN TUNE ✓’;}
-else if(db<1.5){verdictEl.className=‘verdict close’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s — CLOSE`;}
-else{verdictEl.className=‘verdict out’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s — ADJUST`;}
-drawBeatWave(rms>0.0005?db:-1);
+else if(db<1.5){verdictEl.className=‘verdict close’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s —`;}
+else{verdictEl.className=‘verdict out’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s —`;}
+
 sgramThrottle++;
-if(sgramThrottle>=3){sgramThrottle=0;drawSpectrogram(freqData,sampleRate,FFT_SIZE);}
+if(sgramThrottle>=2){sgramThrottle=0;drawSpectrum(freqData,sampleRate,FFT_SIZE);}
 updatePeaksUI(peaks,fundamental);
-updateSgramYaxis();
 }
 
 micBtn.addEventListener(‘click’,async()=>{isRunning?stopMic():await startMic();});
@@ -397,7 +365,6 @@ analyser.smoothingTimeConstant=0.6;
 analyser.minDecibels=-100;analyser.maxDecibels=-10;
 const source=audioCtx.createMediaStreamSource(micStream);
 source.connect(analyser);
-// ScriptProcessor for iOS 26 - keeps AudioContext alive
 const proc=audioCtx.createScriptProcessor(2048,1,1);
 proc.onaudioprocess=(e)=>{
 if(!isRunning)return;
@@ -410,7 +377,7 @@ proc.connect(audioCtx.destination);
 isRunning=true;
 micBtn.textContent=‘■ MIC OFF’;micBtn.classList.add(‘active’);
 statusText.textContent=‘解析中… ピアノを弾いてください’;
-resizeCanvases();analyze();
+resizeCanvas();analyze();
 }catch(e){statusText.textContent=’マイクアクセス拒否: ’+e.message;}
 }
 
@@ -418,14 +385,15 @@ function stopMic(){
 isRunning=false;cancelAnimationFrame(animFrame);
 if(micStream)micStream.getTracks().forEach(t=>t.stop());
 if(audioCtx)audioCtx.close();
+audioCtx=null;micStream=null;analyser=null;window._pcm=null;
 micBtn.textContent=‘▶ MIC ON’;micBtn.classList.remove(‘active’);
 statusText.textContent=‘マイクをオンにして調律を開始’;
 noteNameEl.textContent=’—’;freqHzEl.textContent=’— Hz’;freqCentsEl.textContent=‘± — cents’;
-beatHzEl.textContent=’— beat/s’;beatHzEl.classList.remove(‘zero’);
+beatDisp.textContent=’—’;beatDisp.classList.remove(‘zero’);
 verdictEl.className=‘verdict out’;verdictText.textContent=‘SIGNAL WAITING…’;
-ampHistory2=[];lastBeatHz=0;smoothBeat=0;sgramBuffer=[];currentFundamental=null;
-sgramCtx.clearRect(0,0,sgramCanvas.width,sgramCanvas.height);
-sgramYaxis.innerHTML=’’;freqRangeLabel.textContent=‘基音〜第8倍音’;
+ampHistory=[];lastBeatHz=0;smoothBeat=0;currentFundamental=null;
+specCtx.clearRect(0,0,specCanvas.width,specCanvas.height);
+freqRangeLabel.textContent=‘基音〜第8倍音’;
 }
 </script>
 
