@@ -32,7 +32,7 @@
 .freq-cents { font-family: var(–mono); font-size: 0.78rem; color: var(–dim); margin-top: 4px; }
 
 .slider-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
-.slider-row label { font-family: var(–mono); font-size: 0.65rem; color: var(–dim); white-space: nowrap; min-width: 60px; }
+.slider-row label { font-family: var(–mono); font-size: 0.65rem; color: var(–dim); white-space: nowrap; min-width: 70px; }
 .slider-row input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(–border); outline: none; }
 .slider-row input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: var(–accent); cursor: pointer; }
 .slider-val { font-family: var(–mono); font-size: 0.65rem; color: var(–accent); min-width: 44px; text-align: right; }
@@ -58,18 +58,12 @@
 #beat-disp { font-family: var(–mono); font-size: 0.85rem; color: var(–yellow); }
 #beat-disp.zero { color: var(–green); }
 
-/* Spectrogram */
 .sgram-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
 .sgram-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .slabel { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; }
 #freq-range { font-family: var(–mono); font-size: 0.62rem; color: var(–dim); }
 .sgram-wrap { position: relative; }
-#sgram-canvas { width: 100%; height: 300px; display: block; border-radius: 2px; background: #000; }
-/* Y axis labels */
-.yaxis { position: absolute; left: 2px; top: 0; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 4px 0; pointer-events: none; }
-.yaxis span { font-family: var(–mono); font-size: 0.48rem; color: rgba(255,255,255,0.5); background: rgba(0,0,0,0.6); padding: 1px 3px; border-radius: 2px; line-height: 1.3; }
-.yaxis span.sel { color: var(–yellow); font-weight: bold; }
-.yaxis span.intune { color: var(–green); font-weight: bold; }
+#sgram-canvas { width: 100%; height: 320px; display: block; border-radius: 2px; background: #000; }
 
 .peaks-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 10px 14px; }
 #peaks-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
@@ -124,12 +118,11 @@
 
   <div class="sgram-section">
     <div class="sgram-header">
-      <span class="slabel">SPECTROGRAM</span>
-      <span id="freq-range">基音〜第8倍音</span>
+      <span class="slabel">SPECTROGRAM · P1〜P8</span>
+      <span id="freq-range">—</span>
     </div>
     <div class="sgram-wrap">
       <canvas id="sgram-canvas"></canvas>
-      <div class="yaxis" id="yaxis"></div>
     </div>
   </div>
 
@@ -141,10 +134,10 @@
 </div>
 <script>
 const NOTES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const A4=440, FFTSIZE=8192, SGRAM_COLS=250;
+const A4=440, FFTSIZE=8192, SGRAM_COLS=300;
 let audioCtx=null, analyser=null, stream=null, gainNode=null;
 let running=false, selHarm=4, lastBeat=0, smoothBeat=0, raf=null;
-let envBuf=[], f0=null, fMin=50, fMax=5000, throttle=0;
+let envBuf=[], f0=null, throttle=0;
 let sgramBuf=[], brightness=1.5;
 
 const micBtn    = document.getElementById(‘mic-btn’);
@@ -157,7 +150,6 @@ const vtextEl   = document.getElementById(‘vtext’);
 const beatEl    = document.getElementById(‘beat-disp’);
 const peaksEl   = document.getElementById(‘peaks-list’);
 const rangeEl   = document.getElementById(‘freq-range’);
-const yaxisEl   = document.getElementById(‘yaxis’);
 const canvas    = document.getElementById(‘sgram-canvas’);
 const gfx       = canvas.getContext(‘2d’);
 const gainSlider   = document.getElementById(‘gain-slider’);
@@ -165,7 +157,6 @@ const gainValEl    = document.getElementById(‘gain-val’);
 const brightSlider = document.getElementById(‘bright-slider’);
 const brightValEl  = document.getElementById(‘bright-val’);
 
-// sliders
 gainSlider.addEventListener(‘input’, function(){
 gainValEl.textContent=‘x’+parseFloat(this.value).toFixed(1);
 if(gainNode) gainNode.gain.value=parseFloat(this.value);
@@ -175,13 +166,11 @@ brightness=parseFloat(this.value);
 brightValEl.textContent=‘x’+brightness.toFixed(1);
 });
 
-// harmonic buttons
 const harmEl=document.getElementById(‘harm-btns’);
 function updateHarm(){
 document.querySelectorAll(’.hbtn’).forEach(b=>{
 b.classList.toggle(‘sel’, parseInt(b.dataset.n)===selHarm);
 });
-updateYaxis();
 }
 for(let n=1;n<=8;n++){
 const b=document.createElement(‘button’);
@@ -201,8 +190,8 @@ window.addEventListener(‘resize’, resize);
 resize();
 
 function f2note(freq){
-const m=12*Math.log2(freq/A4)+69, mr=Math.round(m);
-return{name:NOTES[((mr%12)+12)%12]+(Math.floor(mr/12)-1), cents:(m-mr)*100};
+const m=12*Math.log2(freq/A4)+69,mr=Math.round(m);
+return{name:NOTES[((mr%12)+12)%12]+(Math.floor(mr/12)-1),cents:(m-mr)*100};
 }
 
 function getPeaks(fd,sr,fftSize){
@@ -237,97 +226,97 @@ let c=0;for(let i=1;i<sl.length;i++)if((sl[i]-mn)*(sl[i-1]-mn)<0)c++;
 const b=(c/2)/(N/60);return b>0.08&&b<20?b:0;
 }
 
-function lineCol(beat){
-if(beat<0.08)return{s:‘rgba(0,255,136,0.95)’,cls:‘intune’};
-if(beat<1.5)return{s:‘rgba(255,221,0,0.95)’,cls:‘sel’};
-return{s:‘rgba(255,51,85,0.95)’,cls:‘sel’};
-}
-
-// colormap: black→blue→cyan→green→yellow→red
+// colormap: black→blue→cyan→green→yellow→red (like reference image)
 function cmap(v){
 const n=Math.max(0,Math.min(1,v));
 let r,g,b;
-if(n<0.2){const t=n/0.2;r=0;g=0;b=Math.round(200*t);}
-else if(n<0.4){const t=(n-0.2)/0.2;r=0;g=Math.round(220*t);b=200;}
-else if(n<0.6){const t=(n-0.4)/0.2;r=0;g=220;b=Math.round(200*(1-t));}
-else if(n<0.8){const t=(n-0.6)/0.2;r=Math.round(255*t);g=220;b=0;}
-else{const t=(n-0.8)/0.2;r=255;g=Math.round(220*(1-t*0.8));b=0;}
+if(n<0.15){const t=n/0.15;r=0;g=0;b=Math.round(180*t);}
+else if(n<0.35){const t=(n-0.15)/0.2;r=0;g=Math.round(220*t);b=180;}
+else if(n<0.55){const t=(n-0.35)/0.2;r=0;g=220;b=Math.round(180*(1-t));}
+else if(n<0.75){const t=(n-0.55)/0.2;r=Math.round(255*t);g=220;b=0;}
+else{const t=(n-0.75)/0.25;r=255;g=Math.round(220*(1-t));b=0;}
 return[r,g,b];
 }
 
-function updateYaxis(){
-yaxisEl.innerHTML=’’;
-if(!f0)return;
-const lc=lineCol(smoothBeat);
-for(let n=1;n<=8;n++){
-const sp=document.createElement(‘span’);
-sp.textContent=`P${n} ${(f0*n).toFixed(0)}Hz`;
-if(n===selHarm)sp.className=lc.cls;
-yaxisEl.appendChild(sp);
+// Get amplitude for a specific partial (n=1..8)
+function getPartialAmp(fd,sr,fftSize,fund,n){
+const bHz=sr/fftSize;
+const target=fund*n;
+const targetBin=target/bHz;
+const window=Math.ceil(targetBin*0.03)+2;
+let maxVal=0;
+for(let b=Math.max(0,Math.floor(targetBin)-window);b<=Math.min(fd.length-1,Math.floor(targetBin)+window);b++){
+if(fd[b]>maxVal) maxVal=fd[b];
 }
+return Math.max(0,Math.min(1,(maxVal-20)/80*brightness));
 }
 
 function drawSgram(fd,sr,fftSize){
-const w=canvas.width,h=canvas.height;
-const binHz=sr/fftSize;
-const lo=Math.max(0,Math.floor(fMin/binHz));
-const hi=Math.min(fd.length-1,Math.ceil(fMax/binHz));
-const nb=hi-lo;if(nb<=0)return;
+if(!f0) return;
+const w=canvas.width, h=canvas.height;
+const dpr=devicePixelRatio;
 
-// build column (frequency bins → normalized amplitude)
-const col=new Float32Array(nb);
-for(let i=0;i<nb;i++) col[i]=Math.max(0,Math.min(1,(fd[lo+i]-20)/80*brightness));
+// Each partial gets equal height band
+const bandH=Math.floor(h/8);
+const partialH=bandH-1; // 1px gap
+
+// Build column: 8 partial amplitudes
+const col=new Float32Array(8);
+for(let n=1;n<=8;n++) col[n-1]=getPartialAmp(fd,sr,fftSize,f0,n);
 sgramBuf.push(col);
-if(sgramBuf.length>SGRAM_COLS)sgramBuf.shift();
+if(sgramBuf.length>SGRAM_COLS) sgramBuf.shift();
 
-// clear
+// Clear
 gfx.fillStyle=’#000’;gfx.fillRect(0,0,w,h);
 
-// draw columns: x=time, y=frequency (low at bottom)
+// Draw: time flows right→left (newest on right)
 const colW=Math.max(1,w/SGRAM_COLS);
 for(let ci=0;ci<sgramBuf.length;ci++){
 const c=sgramBuf[ci];
 const x=Math.round((ci/SGRAM_COLS)*w);
 const pw=Math.max(1,Math.round(colW));
-const img=gfx.createImageData(pw,h);
-const px=img.data;
-for(let py=0;py<h;py++){
-// py=0 is top (high freq), py=h-1 is bottom (low freq)
-const ff=1-(py/h);
-const bi=ff*(c.length-1);
-const b0=Math.floor(bi),b1=Math.min(c.length-1,b0+1);
-const val=c[b0]*(1-(bi-b0))+c[b1]*(bi-b0);
-const[r,g,b]=cmap(val);
-for(let dx=0;dx<pw;dx++){
-const idx=(py*pw+dx)*4;
-px[idx]=r;px[idx+1]=g;px[idx+2]=b;px[idx+3]=255;
+
+```
+for(let n=1;n<=8;n++){
+  const amp=c[n-1];
+  const [r,g,b]=cmap(amp);
+  // P1 at bottom, P8 at top
+  const bandIdx=n-1; // 0=P1 at bottom
+  const py=h - (bandIdx+1)*bandH;
+  gfx.fillStyle=`rgb(${r},${g},${b})`;
+  gfx.fillRect(x, py, pw, partialH);
 }
-}
-gfx.putImageData(img,x,0);
+```
+
 }
 
-// horizontal partial lines (y axis = frequency)
-if(f0){
-const lc=lineCol(smoothBeat);
+// Partial labels on left side
+gfx.textAlign=‘left’;
 for(let n=1;n<=8;n++){
-const freq=f0*n;
-if(freq<fMin||freq>fMax)continue;
-const ff=(freq-fMin)/(fMax-fMin);
-const py=(1-ff)*h;
+const bandIdx=n-1;
+const py=h-(bandIdx+1)*bandH;
 const isSel=n===selHarm;
+const latestAmp=sgramBuf.length>0?sgramBuf[sgramBuf.length-1][n-1]:0;
+
+```
+// band separator line
+gfx.strokeStyle='rgba(30,35,48,0.8)';gfx.lineWidth=1;
+gfx.beginPath();gfx.moveTo(0,py+partialH);gfx.lineTo(w,py+partialH);gfx.stroke();
+
+// label
+const labelColor=isSel?'rgba(255,221,0,0.95)':'rgba(255,255,255,0.5)';
+gfx.fillStyle=labelColor;
+gfx.font=`${isSel?'bold ':''}${Math.round(9*dpr)}px monospace`;
+gfx.fillText(`P${n} ${(f0*n).toFixed(0)}Hz`, 4*dpr, py+partialH-4*dpr);
+
+// selected partial highlight border
 if(isSel){
-gfx.save();
-gfx.strokeStyle=lc.s;gfx.lineWidth=4*devicePixelRatio;
-gfx.shadowBlur=12*devicePixelRatio;gfx.shadowColor=lc.s;
-gfx.beginPath();gfx.moveTo(0,py);gfx.lineTo(w,py);gfx.stroke();
-gfx.restore();
-} else {
-gfx.strokeStyle=‘rgba(255,255,255,0.2)’;gfx.lineWidth=1*devicePixelRatio;
-gfx.setLineDash([4,5]);
-gfx.beginPath();gfx.moveTo(0,py);gfx.lineTo(w,py);gfx.stroke();
-gfx.setLineDash([]);
+  gfx.strokeStyle='rgba(255,221,0,0.6)';
+  gfx.lineWidth=2*dpr;
+  gfx.strokeRect(0,py,w,partialH);
 }
-}
+```
+
 }
 }
 
@@ -360,15 +349,12 @@ const fund=getFund(peaks);
 
 if(fund&&rms>0.0005){
 f0=fund;
-fMin=Math.max(20,f0*0.85);
-fMax=f0*8.15;
 const ni=f2note(f0);
 noteEl.textContent=ni.name;
 hzEl.textContent=f0.toFixed(2)+’ Hz’;
 centEl.textContent=(ni.cents>=0?’+’:’’)+ni.cents.toFixed(1)+’ cents’;
 centEl.style.color=Math.abs(ni.cents)<5?‘var(–green)’:Math.abs(ni.cents)<15?‘var(–yellow)’:‘var(–red)’;
-rangeEl.textContent=`${fMin.toFixed(0)}〜${fMax.toFixed(0)} Hz`;
-updateYaxis();
+rangeEl.textContent=`${f0.toFixed(0)}〜${(f0*8).toFixed(0)} Hz`;
 } else if(rms<0.0002){
 noteEl.textContent=’—’;hzEl.textContent=’— Hz’;centEl.textContent=‘± — cents’;
 }
@@ -426,7 +412,7 @@ beatEl.textContent=’—’;beatEl.classList.remove(‘zero’);
 verdictEl.className=‘verdict out’;vtextEl.textContent=‘SIGNAL WAITING…’;
 envBuf=[];lastBeat=0;smoothBeat=0;f0=null;sgramBuf=[];
 gfx.clearRect(0,0,canvas.width,canvas.height);
-rangeEl.textContent=‘基音〜第8倍音’;yaxisEl.innerHTML=’’;
+rangeEl.textContent=’—’;
 }
 </script>
 
