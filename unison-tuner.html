@@ -23,55 +23,52 @@
   header h1 { font-family: var(--mono); font-size: 1.05rem; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; }
   header span { font-size: 0.68rem; color: var(--dim); letter-spacing: 0.1em; }
   .main-grid { width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 12px; }
-
-.status-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
-#mic-btn { font-family: var(–mono); font-size: 0.73rem; letter-spacing: 0.1em; background: transparent; border: 1px solid var(–accent); color: var(–accent); padding: 6px 14px; border-radius: 2px; cursor: pointer; transition: background 0.2s, color 0.2s; text-transform: uppercase; }
-#mic-btn:hover { background: var(–accent); color: var(–bg); }
-#mic-btn.active { background: var(–red); border-color: var(–red); color: #fff; }
-#status-text { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); flex: 1; }
-
-.note-display { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; }
-.note-name { font-family: var(–mono); font-size: 3rem; color: var(–accent); line-height: 1; min-width: 90px; }
-.freq-info { text-align: right; }
-.freq-hz { font-family: var(–mono); font-size: 1.4rem; color: var(–text); }
-.freq-cents { font-family: var(–mono); font-size: 0.78rem; color: var(–dim); margin-top: 4px; }
-
-.harmonic-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; flex-wrap: wrap; }
-.harmonic-row label { font-size: 0.68rem; color: var(–dim); font-family: var(–mono); white-space: nowrap; }
-.harm-btns { display: flex; gap: 5px; flex-wrap: wrap; }
-.harm-btn { font-family: var(–mono); font-size: 0.72rem; width: 36px; height: 30px; background: transparent; border: 1px solid var(–border); color: var(–dim); border-radius: 2px; cursor: pointer; transition: all 0.15s; }
-.harm-btn:hover { border-color: var(–accent); color: var(–accent); }
-.harm-btn.selected { background: var(–yellow); border-color: var(–yellow); color: #000; font-weight: bold; }
-
-.verdict { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; background: var(–panel); border: 1px solid var(–border); border-radius: 4px; transition: border-color 0.4s; }
-.verdict.in-tune { border-color: var(–green); }
-.verdict.close   { border-color: var(–yellow); }
-.verdict.out     { border-color: var(–red); }
-.verdict-dot { width: 20px; height: 20px; border-radius: 50%; background: var(–dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
-.verdict.in-tune .verdict-dot { background: var(–green); box-shadow: 0 0 18px var(–green); }
-.verdict.close   .verdict-dot { background: var(–yellow); box-shadow: 0 0 12px var(–yellow); }
-.verdict.out     .verdict-dot { background: var(–red); box-shadow: 0 0 8px var(–red); }
-.verdict-text { font-family: var(–mono); font-size: 0.82rem; letter-spacing: 0.12em; color: var(–dim); transition: color 0.3s; }
-.verdict.in-tune .verdict-text { color: var(–green); }
-.verdict.close   .verdict-text { color: var(–yellow); }
-.verdict.out     .verdict-text { color: var(–red); }
-#beat-disp { font-family: var(–mono); font-size: 0.9rem; color: var(–yellow); }
-#beat-disp.zero { color: var(–green); }
-
-/* FFT Spectrum */
-.spectrum-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 12px 16px; }
-.spectrum-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.section-label { font-family: var(–mono); font-size: 0.68rem; color: var(–dim); letter-spacing: 0.12em; text-transform: uppercase; }
-.freq-range-label { font-family: var(–mono); font-size: 0.62rem; color: var(–dim); }
-#spectrum-canvas { width: 100%; height: 280px; display: block; border-radius: 2px; background: #000; }
-
-.peaks-section { background: var(–panel); border: 1px solid var(–border); border-radius: 4px; padding: 10px 14px; }
-#peaks-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-.peak-chip { font-family: var(–mono); font-size: 0.62rem; padding: 2px 6px; border: 1px solid var(–border); border-radius: 2px; color: var(–text); }
-.peak-chip.fundamental { border-color: var(–accent); color: var(–accent); }
-.peak-chip.selected-harm { border-color: var(–yellow); color: var(–yellow); }
+  .status-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  #mic-btn { font-family: var(--mono); font-size: 0.73rem; letter-spacing: 0.1em; background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 6px 14px; border-radius: 2px; cursor: pointer; transition: background 0.2s, color 0.2s; text-transform: uppercase; }
+  #mic-btn:hover { background: var(--accent); color: var(--bg); }
+  #mic-btn.active { background: var(--red); border-color: var(--red); color: #fff; }
+  #status-text { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); flex: 1; }
+  .note-display { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  .note-name { font-family: var(--mono); font-size: 3rem; color: var(--accent); line-height: 1; min-width: 90px; }
+  .freq-info { text-align: right; }
+  .freq-hz { font-family: var(--mono); font-size: 1.4rem; color: var(--text); }
+  .freq-cents { font-family: var(--mono); font-size: 0.78rem; color: var(--dim); margin-top: 4px; }
+  .harmonic-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; flex-wrap: wrap; }
+  .harmonic-row label { font-size: 0.68rem; color: var(--dim); font-family: var(--mono); white-space: nowrap; }
+  .harm-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+  .harm-btn { font-family: var(--mono); font-size: 0.72rem; width: 38px; height: 34px; background: transparent; border: 1px solid var(--border); color: var(--dim); border-radius: 2px; cursor: pointer; transition: all 0.15s; }
+  .harm-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .harm-btn.selected { background: var(--yellow); border-color: var(--yellow); color: #000; font-weight: bold; }
+  .verdict { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; transition: border-color 0.4s; }
+  .verdict.in-tune { border-color: var(--green); }
+  .verdict.close   { border-color: var(--yellow); }
+  .verdict.out     { border-color: var(--red); }
+  .verdict-dot { width: 20px; height: 20px; border-radius: 50%; background: var(--dim); transition: background 0.3s, box-shadow 0.3s; flex-shrink: 0; }
+  .verdict.in-tune .verdict-dot { background: var(--green); box-shadow: 0 0 18px var(--green); }
+  .verdict.close   .verdict-dot { background: var(--yellow); box-shadow: 0 0 12px var(--yellow); }
+  .verdict.out     .verdict-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .verdict-text { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.12em; color: var(--dim); transition: color 0.3s; flex: 1; }
+  .verdict.in-tune .verdict-text { color: var(--green); }
+  .verdict.close   .verdict-text { color: var(--yellow); }
+  .verdict.out     .verdict-text { color: var(--red); }
+  #beat-disp { font-family: var(--mono); font-size: 0.85rem; color: var(--yellow); }
+  #beat-disp.zero { color: var(--green); }
+  .spectrum-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
+  .spectrum-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .section-label { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; }
+  .freq-range-label { font-family: var(--mono); font-size: 0.62rem; color: var(--dim); }
+  #spectrum-canvas { width: 100%; height: 280px; display: block; border-radius: 2px; background: #000; }
+  .gain-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  .gain-row label { font-family: var(--mono); font-size: 0.65rem; color: var(--dim); white-space: nowrap; }
+  #gain-slider { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--border); outline: none; }
+  #gain-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  #gain-val { font-family: var(--mono); font-size: 0.65rem; color: var(--accent); min-width: 36px; text-align: right; }
+  .peaks-section { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; }
+  #peaks-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .peak-chip { font-family: var(--mono); font-size: 0.62rem; padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px; color: var(--text); }
+  .peak-chip.fundamental { border-color: var(--accent); color: var(--accent); }
+  .peak-chip.selected-harm { border-color: var(--yellow); color: var(--yellow); }
 </style>
-
 </head>
 <body>
 <header>
@@ -79,12 +76,10 @@
   <span>PIANO · 2-STRING BEAT DETECTOR</span>
 </header>
 <div class="main-grid">
-
   <div class="status-bar">
     <button id="mic-btn">▶ MIC ON</button>
     <span id="status-text">マイクをオンにして調律を開始</span>
   </div>
-
   <div class="note-display">
     <div class="note-name" id="note-name">—</div>
     <div class="freq-info">
@@ -92,20 +87,20 @@
       <div class="freq-cents" id="freq-cents">± — cents</div>
     </div>
   </div>
-
+  <div class="gain-row">
+    <label>GAIN</label>
+    <input type="range" id="gain-slider" min="1" max="20" step="0.5" value="5">
+    <span id="gain-val">x5.0</span>
+  </div>
   <div class="harmonic-row">
     <label>倍音選択：</label>
     <div class="harm-btns" id="harm-btns"></div>
   </div>
-
   <div class="verdict out" id="verdict">
     <div class="verdict-dot"></div>
     <span class="verdict-text" id="verdict-text">SIGNAL WAITING...</span>
     <span id="beat-disp">—</span>
   </div>
-
-  <!-- FFT Spectrum with partial lines -->
-
   <div class="spectrum-section">
     <div class="spectrum-header">
       <span class="section-label">FFT SPECTRUM</span>
@@ -113,49 +108,55 @@
     </div>
     <canvas id="spectrum-canvas"></canvas>
   </div>
-
   <div class="peaks-section">
     <div class="section-label">DETECTED PARTIALS</div>
     <div id="peaks-list"><span style="color:var(--dim);font-family:var(--mono);font-size:0.62rem;">—</span></div>
   </div>
-
 </div>
 <script>
-const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const A4_FREQ = 440.0;
-const FFT_SIZE = 8192;
+const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const A4_FREQ=440.0;
+const FFT_SIZE=8192;
 
-let audioCtx=null, analyser=null, micStream=null;
-let isRunning=false, selectedHarmonic=4;
-let lastBeatHz=0, animFrame=null, smoothBeat=0;
-let ampHistory=[], currentFundamental=null;
-let fMin=50, fMax=4000, sgramThrottle=0;
+let audioCtx=null,analyser=null,micStream=null,processor=null,gainNode=null;
+const gainSlider=document.getElementById(“gain-slider”);
+const gainVal=document.getElementById(“gain-val”);
+gainSlider.addEventListener(“input”,function(){
+const v=parseFloat(this.value);
+gainVal.textContent=“x”+v.toFixed(1);
+if(gainNode) gainNode.gain.value=v;
+});
+let isRunning=false,selectedHarmonic=4;
+let lastBeatHz=0,animFrame=null,smoothBeat=0;
+let ampHistory=[],currentFundamental=null;
+let fMin=50,fMax=5000,throttle=0;
 
-const micBtn        = document.getElementById(‘mic-btn’);
-const statusText    = document.getElementById(‘status-text’);
-const noteNameEl    = document.getElementById(‘note-name’);
-const freqHzEl      = document.getElementById(‘freq-hz’);
-const freqCentsEl   = document.getElementById(‘freq-cents’);
-const verdictEl     = document.getElementById(‘verdict’);
-const verdictText   = document.getElementById(‘verdict-text’);
-const beatDisp      = document.getElementById(‘beat-disp’);
-const peaksList     = document.getElementById(‘peaks-list’);
-const freqRangeLabel= document.getElementById(‘freq-range-label’);
-const specCanvas    = document.getElementById(‘spectrum-canvas’);
-const specCtx       = specCanvas.getContext(‘2d’);
+const micBtn=document.getElementById(‘mic-btn’);
+const statusText=document.getElementById(‘status-text’);
+const noteNameEl=document.getElementById(‘note-name’);
+const freqHzEl=document.getElementById(‘freq-hz’);
+const freqCentsEl=document.getElementById(‘freq-cents’);
+const verdictEl=document.getElementById(‘verdict’);
+const verdictText=document.getElementById(‘verdict-text’);
+const beatDisp=document.getElementById(‘beat-disp’);
+const peaksList=document.getElementById(‘peaks-list’);
+const freqRangeLabel=document.getElementById(‘freq-range-label’);
+const specCanvas=document.getElementById(‘spectrum-canvas’);
+const specCtx=specCanvas.getContext(‘2d’);
 
-// ── Harmonic buttons ─────────────────────────────────────────
-const harmBtnsEl = document.getElementById(‘harm-btns’);
-function updateHarmonicUI() {
+// harmonic buttons
+const harmBtnsEl=document.getElementById(‘harm-btns’);
+function updateHarmonicUI(){
 document.querySelectorAll(’.harm-btn’).forEach((b,i)=>{
-if(i+1===selectedHarmonic) b.classList.add(‘selected’); else b.classList.remove(‘selected’);
+if(i+1===selectedHarmonic)b.classList.add(‘selected’);else b.classList.remove(‘selected’);
 });
 }
-for(let i=1;i<=8;i++){
+for(let n=1;n<=8;n++){
 const b=document.createElement(‘button’);
-b.className=‘harm-btn’+(i===selectedHarmonic?’ selected’:’’);
-b.textContent=i===1?‘基音’:`${i}倍`;
-b.addEventListener(‘click’,()=>{selectedHarmonic=i;updateHarmonicUI();});
+b.className=‘harm-btn’+(n===selectedHarmonic?’ selected’:’’);
+b.textContent=n===1?‘基音’:`${n}倍`;
+b.dataset.n=n;
+b.onclick=function(){selectedHarmonic=parseInt(this.dataset.n);updateHarmonicUI();};
 harmBtnsEl.appendChild(b);
 }
 
@@ -211,40 +212,37 @@ const b=(c/2)/(N/60);
 return b>0.08&&b<20?b:0;
 }
 
-// ── Selected partial line color ───────────────────────────────
 function lineColor(beat){
-if(beat<0.08)return{stroke:‘rgba(0,255,136,1)’,  glow:‘rgba(0,255,136,0.5)’};
-if(beat<1.5) return{stroke:‘rgba(255,221,0,1)’,  glow:‘rgba(255,221,0,0.45)’};
-return             {stroke:‘rgba(255,51,85,1)’,   glow:‘rgba(255,51,85,0.45)’};
+if(beat<0.08)return{stroke:‘rgba(0,255,136,1)’,glow:‘rgba(0,255,136,0.5)’};
+if(beat<1.5)return{stroke:‘rgba(255,221,0,1)’,glow:‘rgba(255,221,0,0.45)’};
+return{stroke:‘rgba(255,51,85,1)’,glow:‘rgba(255,51,85,0.45)’};
 }
 
-// ── Draw FFT spectrum with partial lines ──────────────────────
 function drawSpectrum(freqData,sampleRate,fftSize){
 const w=specCanvas.width,h=specCanvas.height;
 specCtx.fillStyle=’#000’;specCtx.fillRect(0,0,w,h);
-
 const binHz=sampleRate/fftSize;
-const maxFreq=fMax||5000;
+const maxFreq=fMax;
 const maxBin=Math.min(freqData.length-1,Math.ceil(maxFreq/binHz));
 
-// Grid lines
+// grid
 specCtx.strokeStyle=‘rgba(30,35,48,0.8)’;specCtx.lineWidth=1;
 for(let f=500;f<=maxFreq;f+=500){
 const x=(f/maxFreq)*w;
 specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
 }
 
-// Spectrum bars
+// spectrum
+const bw=Math.max(1,w/maxBin);
 for(let i=0;i<maxBin;i++){
 const norm=Math.max(0,(freqData[i]-20)/80);
 if(norm<=0)continue;
 const x=(i*binHz/maxFreq)*w;
-const bw=Math.max(1,w/maxBin);
 specCtx.fillStyle=`rgba(0,229,255,${norm*0.7})`;
 specCtx.fillRect(x,h-norm*h,bw,norm*h);
 }
 
-// Partial guide lines
+// partial lines
 if(currentFundamental){
 const lc=lineColor(smoothBeat);
 for(let n=1;n<=8;n++){
@@ -253,23 +251,21 @@ if(freq<=0||freq>maxFreq)continue;
 const x=(freq/maxFreq)*w;
 const isSel=n===selectedHarmonic;
 if(isSel){
-// thick glowing line for selected partial
 specCtx.save();
 specCtx.strokeStyle=lc.glow;
-specCtx.lineWidth=16*devicePixelRatio;
-specCtx.shadowBlur=20*devicePixelRatio;
+specCtx.lineWidth=18*devicePixelRatio;
+specCtx.shadowBlur=24*devicePixelRatio;
 specCtx.shadowColor=lc.stroke;
 specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
 specCtx.strokeStyle=lc.stroke;
-specCtx.lineWidth=4*devicePixelRatio;
+specCtx.lineWidth=5*devicePixelRatio;
 specCtx.shadowBlur=0;
 specCtx.beginPath();specCtx.moveTo(x,0);specCtx.lineTo(x,h);specCtx.stroke();
 specCtx.restore();
-// label
 specCtx.fillStyle=lc.stroke;
-specCtx.font=`bold ${Math.round(11*devicePixelRatio)}px monospace`;
+specCtx.font=`bold ${Math.round(12*devicePixelRatio)}px monospace`;
 specCtx.textAlign=‘center’;
-specCtx.fillText(`P${n}`,x,20*devicePixelRatio);
+specCtx.fillText(`P${n}`,x,22*devicePixelRatio);
 } else {
 specCtx.strokeStyle=‘rgba(255,255,255,0.25)’;
 specCtx.lineWidth=1.5*devicePixelRatio;
@@ -279,7 +275,7 @@ specCtx.setLineDash([]);
 specCtx.fillStyle=‘rgba(255,255,255,0.4)’;
 specCtx.font=`${Math.round(9*devicePixelRatio)}px monospace`;
 specCtx.textAlign=‘center’;
-specCtx.fillText(`P${n}`,x,20*devicePixelRatio);
+specCtx.fillText(`P${n}`,x,22*devicePixelRatio);
 }
 }
 }
@@ -296,24 +292,25 @@ chip.textContent=`${p.freq.toFixed(1)}Hz`;peaksList.appendChild(chip);
 });
 }
 
+function getRMS(){
+if(window._pcm){
+let s=0;for(let i=0;i<window._pcm.length;i++)s+=window._pcm[i]*window._pcm[i];
+return Math.sqrt(s/window._pcm.length);
+}
+if(!analyser)return 0;
+const td=new Uint8Array(analyser.fftSize);
+analyser.getByteTimeDomainData(td);
+let s=0;for(let i=0;i<td.length;i++){const v=(td[i]-128)/128;s+=v*v;}
+return Math.sqrt(s/td.length);
+}
+
 function analyze(){
 if(!isRunning)return;
 animFrame=requestAnimationFrame(analyze);
 const freqData=new Uint8Array(analyser.frequencyBinCount);
-const timeData=new Uint8Array(analyser.fftSize);
 analyser.getByteFrequencyData(freqData);
-analyser.getByteTimeDomainData(timeData);
 const sampleRate=audioCtx.sampleRate;
-
-// RMS from ScriptProcessor if available, else timeData
-let rms=0;
-if(window._pcm){
-for(let i=0;i<window._pcm.length;i++)rms+=window._pcm[i]*window._pcm[i];
-rms=Math.sqrt(rms/window._pcm.length);
-} else {
-for(let i=0;i<timeData.length;i++){const s=(timeData[i]-128)/128;rms+=s*s;}
-rms=Math.sqrt(rms/timeData.length);
-}
+const rms=getRMS();
 
 const peaks=detectPeaks(freqData,sampleRate,FFT_SIZE);
 const fundamental=findFundamental(peaks);
@@ -333,22 +330,22 @@ noteNameEl.textContent=’—’;freqHzEl.textContent=’— Hz’;freqCentsEl.t
 }
 
 const beatHz=estimateBeat(rms);
-if(rms>0.0005) lastBeatHz=lastBeatHz*0.85+beatHz*0.15; else lastBeatHz*=0.95;
+if(rms>0.0005)lastBeatHz=lastBeatHz*0.85+beatHz*0.15;else lastBeatHz*=0.95;
 smoothBeat=lastBeatHz;
 const db=smoothBeat;
 
 if(rms>0.0005){
 if(db<0.08){beatDisp.textContent=‘0.0 beat/s’;beatDisp.classList.add(‘zero’);}
 else{beatDisp.textContent=db.toFixed(1)+’ beat/s’;beatDisp.classList.remove(‘zero’);}
-} else {beatDisp.textContent=’—’;beatDisp.classList.remove(‘zero’);}
+}else{beatDisp.textContent=’—’;beatDisp.classList.remove(‘zero’);}
 
 if(rms<0.0005){verdictEl.className=‘verdict out’;verdictText.textContent=‘SIGNAL WAITING…’;}
 else if(db<0.08){verdictEl.className=‘verdict in-tune’;verdictText.textContent=‘IN TUNE ✓’;}
-else if(db<1.5){verdictEl.className=‘verdict close’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s —`;}
-else{verdictEl.className=‘verdict out’;verdictText.textContent=`BEAT ${db.toFixed(1)}/s —`;}
+else if(db<1.5){verdictEl.className=‘verdict close’;verdictText.textContent=‘BEAT — CLOSE’;}
+else{verdictEl.className=‘verdict out’;verdictText.textContent=‘BEAT — ADJUST’;}
 
-sgramThrottle++;
-if(sgramThrottle>=2){sgramThrottle=0;drawSpectrum(freqData,sampleRate,FFT_SIZE);}
+throttle++;
+if(throttle>=2){throttle=0;drawSpectrum(freqData,sampleRate,FFT_SIZE);}
 updatePeaksUI(peaks,fundamental);
 }
 
@@ -357,32 +354,38 @@ micBtn.addEventListener(‘click’,async()=>{isRunning?stopMic():await startMic
 async function startMic(){
 try{
 audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-if(audioCtx.state===‘suspended’) await audioCtx.resume();
+if(audioCtx.state===‘suspended’)await audioCtx.resume();
 micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
 analyser=audioCtx.createAnalyser();
 analyser.fftSize=FFT_SIZE;
 analyser.smoothingTimeConstant=0.6;
-analyser.minDecibels=-100;analyser.maxDecibels=-10;
+analyser.minDecibels=-100;
+analyser.maxDecibels=-10;
 const source=audioCtx.createMediaStreamSource(micStream);
-source.connect(analyser);
-const proc=audioCtx.createScriptProcessor(2048,1,1);
-proc.onaudioprocess=(e)=>{
+gainNode=audioCtx.createGain();
+gainNode.gain.value=parseFloat(gainSlider.value);
+source.connect(gainNode);
+gainNode.connect(analyser);
+processor=audioCtx.createScriptProcessor(2048,1,1);
+processor.onaudioprocess=function(e){
 if(!isRunning)return;
 const d=e.inputBuffer.getChannelData(0);
 if(!window._pcm||window._pcm.length!==d.length)window._pcm=new Float32Array(d.length);
 window._pcm.set(d);
 };
-source.connect(proc);
-proc.connect(audioCtx.destination);
+gainNode.connect(processor);
+processor.connect(audioCtx.destination);
 isRunning=true;
 micBtn.textContent=‘■ MIC OFF’;micBtn.classList.add(‘active’);
 statusText.textContent=‘解析中… ピアノを弾いてください’;
 resizeCanvas();analyze();
-}catch(e){statusText.textContent=’マイクアクセス拒否: ’+e.message;}
+}catch(e){statusText.textContent=’エラー: ’+e.message;}
 }
 
 function stopMic(){
 isRunning=false;cancelAnimationFrame(animFrame);
+if(processor){processor.disconnect();processor=null;}
+if(gainNode){gainNode.disconnect();gainNode=null;}
 if(micStream)micStream.getTracks().forEach(t=>t.stop());
 if(audioCtx)audioCtx.close();
 audioCtx=null;micStream=null;analyser=null;window._pcm=null;
