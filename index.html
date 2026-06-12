@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Unison Analyzer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body {
+background: #111;
+color: #fff;
+font-family: -apple-system, ‘Helvetica Neue’, sans-serif;
+min-height: 100dvh;
+display: flex;
+flex-direction: column;
+font-size: 13px;
+overflow-x: hidden;
+}
+
+/* ── Header ── */
+#header {
+background: #1a1a1a;
+border-bottom: 1px solid #333;
+padding: 8px 12px;
+display: flex;
+flex-direction: column;
+gap: 6px;
+}
+
+#title-row {
+display: flex;
+align-items: center;
+justify-content: center;
+position: relative;
+}
+#app-title {
+font-size: 17px;
+font-weight: 600;
+letter-spacing: 1px;
+color: #fff;
+}
+#mic-btn {
+position: absolute;
+right: 0;
+background: #2a0808;
+border: 1.5px solid #882;
+border-radius: 8px;
+color: #f55;
+font-size: 13px;
+font-family: -apple-system, sans-serif;
+padding: 6px 12px;
+cursor: pointer;
+-webkit-appearance: none;
+transition: all 0.15s;
+min-width: 90px;
+text-align: center;
+}
+#mic-btn.on {
+background: #0a1a2a;
+border-color: #2255aa;
+color: #88aaff;
+}
+
+/* Info bar */
+#info-bar {
+display: grid;
+grid-template-columns: 1fr 2fr 1fr;
+gap: 8px;
+align-items: center;
+}
+.info-box {
+background: #222;
+border: 1px solid #333;
+border-radius: 6px;
+padding: 5px 8px;
+}
+.info-box .ib-label { font-size: 10px; color: #888; margin-bottom: 2px; }
+#note-big { font-size: 28px; font-weight: bold; color: #fff; line-height: 1; }
+#note-sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+#note-freq-val { font-size: 14px; color: #ccc; }
+
+/* Tuning meter */
+#tuning-box { text-align: center; }
+#meter-wrap {
+position: relative;
+height: 16px;
+background: linear-gradient(to right, #c00 0%, #880 30%, #0a0 48%, #0a0 52%, #880 70%, #c00 100%);
+border-radius: 3px;
+overflow: hidden;
+margin: 3px 0;
+}
+#meter-scale {
+position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+display: flex; justify-content: space-between; align-items: center;
+padding: 0 4px;
+pointer-events: none;
+}
+#meter-scale span { font-size: 9px; color: rgba(255,255,255,0.7); }
+#meter-needle {
+position: absolute;
+top: 0; bottom: 0;
+width: 2px;
+background: #fff;
+transform: translateX(-50%);
+left: 50%;
+transition: left 0.1s;
+border-radius: 1px;
+}
+#cents-val { font-size: 12px; color: #aaa; }
+
+/* Level meter */
+#level-bar-wrap {
+height: 14px;
+background: #000;
+border-radius: 3px;
+overflow: hidden;
+margin: 3px 0;
+border: 1px solid #333;
+}
+#level-bar {
+height: 100%;
+width: 0%;
+background: linear-gradient(to right, #0c0, #aa0, #c00);
+transition: width 0.05s;
+}
+#level-db { font-size: 11px; color: #aaa; text-align: right; }
+
+/* ── Section label ── */
+.section-label {
+background: #1a1a1a;
+border-top: 1px solid #333;
+border-bottom: 1px solid #333;
+padding: 4px 12px;
+font-size: 11px;
+color: #888;
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+
+/* ── Spectrogram panels ── */
+#spectro-wrap {
+flex: 1;
+display: flex;
+flex-direction: column;
+background: #000;
+overflow: hidden;
+}
+
+.harmonic-row {
+display: flex;
+align-items: stretch;
+border-bottom: 1px solid #1a1a1a;
+position: relative;
+flex: 1;
+}
+
+.hr-label {
+width: 54px;
+flex-shrink: 0;
+background: #0d0d0d;
+border-right: 1px solid #222;
+display: flex;
+flex-direction: column;
+justify-content: center;
+align-items: flex-start;
+padding: 2px 6px;
+}
+.hr-label .hl-name { font-size: 12px; font-weight: 600; color: #ccc; }
+.hr-label .hl-freq { font-size: 10px; color: #666; }
+
+.hr-canvas-wrap {
+flex: 1;
+overflow: hidden;
+position: relative;
+}
+.hr-canvas {
+position: absolute;
+top: 0; left: 0;
+width: 100%;
+height: 100%;
+}
+
+/* Mute / select button */
+.hr-btn {
+width: 42px;
+flex-shrink: 0;
+background: #111;
+border: none;
+border-left: 1px solid #222;
+color: #555;
+font-size: 11px;
+cursor: pointer;
+-webkit-appearance: none;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+gap: 2px;
+transition: background 0.15s, color 0.15s;
+padding: 2px;
+}
+.hr-btn.active {
+background: #001a00;
+color: #0f0;
+border-left-color: #0a0;
+}
+.hr-btn.match {
+background: #003300;
+color: #00ff44;
+}
+
+/* Beat overlay inside panel */
+.beat-overlay {
+position: absolute;
+top: 2px; right: 44px;
+background: rgba(0,0,0,0.65);
+border-radius: 4px;
+padding: 1px 5px;
+font-size: 11px;
+font-weight: bold;
+color: #ff0;
+pointer-events: none;
+display: none;
+}
+
+/* ── Beat display bar ── */
+#beat-bar {
+background: #1a1a1a;
+border-top: 1px solid #333;
+padding: 6px 10px;
+display: flex;
+gap: 5px;
+flex-wrap: wrap;
+}
+.beat-card {
+flex: 1;
+min-width: 60px;
+background: #111;
+border: 1px solid #2a2a2a;
+border-radius: 6px;
+padding: 4px 3px;
+text-align: center;
+display: none;
+transition: border-color 0.2s;
+}
+.beat-card .bc-h { font-size: 10px; color: #555; }
+.beat-card .bc-val { font-size: 20px; font-weight: bold; line-height: 1.1; }
+.beat-card .bc-unit { font-size: 9px; color: #555; }
+
+/* ── Controls ── */
+#controls {
+background: #1a1a1a;
+border-top: 1px solid #333;
+padding: 8px 12px;
+display: flex;
+flex-direction: column;
+gap: 8px;
+}
+.ctrl-row {
+display: flex;
+align-items: center;
+gap: 8px;
+}
+.ctrl-label {
+font-size: 11px;
+color: #666;
+min-width: 84px;
+letter-spacing: 0.5px;
+}
+.ctrl-row input[type=range] {
+flex: 1;
+accent-color: #3355cc;
+height: 22px;
+}
+.ctrl-val {
+font-size: 12px;
+color: #888;
+min-width: 36px;
+text-align: right;
+}
+
+/* dB scale bar */
+#db-scale {
+width: 20px;
+flex-shrink: 0;
+display: flex;
+flex-direction: column;
+justify-content: space-between;
+padding: 2px 0;
+background: #000;
+border-left: 1px solid #222;
+}
+#db-gradient {
+width: 10px;
+margin: 0 auto;
+flex: 1;
+background: linear-gradient(to bottom,
+#ff0000 0%, #ff4400 10%, #ff8800 20%,
+#ffcc00 30%, #aaff00 40%, #00ff44 50%,
+#00aaff 65%, #0044ff 80%, #000066 100%);
+border-radius: 2px;
+}
+</style>
+
+</head>
+<body>
+
+<!-- Header -->
+
+<div id="header">
+  <div id="title-row">
+    <span id="app-title">UNISON ANALYZER</span>
+    <button id="mic-btn">🔇 MIC OFF</button>
+  </div>
+
+  <div id="info-bar">
+    <!-- Detected note -->
+    <div class="info-box">
+      <div class="ib-label">Detected Note</div>
+      <div id="note-big">—</div>
+      <div id="note-sub" style="color:#666">— Hz &nbsp; ±0¢</div>
+    </div>
+
+```
+<!-- Tuning meter -->
+<div class="info-box" id="tuning-box">
+  <div class="ib-label" style="text-align:center">Tuning (cents)</div>
+  <div id="meter-wrap">
+    <div id="meter-scale">
+      <span>-50</span><span>-25</span><span>0</span><span>+25</span><span>+50</span>
+    </div>
+    <div id="meter-needle"></div>
+  </div>
+  <div id="cents-val" style="text-align:center">+0.0 cent</div>
+</div>
+
+<!-- Input level -->
+<div class="info-box">
+  <div class="ib-label">Input Level</div>
+  <div id="level-bar-wrap"><div id="level-bar"></div></div>
+  <div id="level-db">— dB</div>
+</div>
+```
+
+  </div>
+</div>
+
+<!-- Spectrogram section label -->
+
+<div class="section-label">
+  <span>FFT / Spectrogram (Harmonics 1–8)</span>
+  <span id="sr-label">44100 Hz</span>
+</div>
+
+<!-- Spectrogram rows + dB scale -->
+
+<div style="display:flex; flex:1; overflow:hidden;">
+  <div id="spectro-wrap" style="flex:1;"></div>
+  <!-- dB scale -->
+  <div id="db-scale">
+    <div style="font-size:9px;color:#888;text-align:center;padding-top:2px;">0</div>
+    <div id="db-gradient"></div>
+    <div style="font-size:9px;color:#888;text-align:center;padding-bottom:2px;">-96</div>
+  </div>
+</div>
+
+<!-- Beat display bar -->
+
+<div class="section-label">
+  <span>Beat Frequency — Selected Harmonics</span>
+</div>
+<div id="beat-bar"></div>
+
+<!-- Controls -->
+
+<div id="controls">
+  <div class="ctrl-row">
+    <span class="ctrl-label">MIC GAIN</span>
+    <input type="range" id="sl-gain" min="0.5" max="6" step="0.1" value="2.0">
+    <span class="ctrl-val" id="vl-gain">2.0</span>
+  </div>
+  <div class="ctrl-row">
+    <span class="ctrl-label">SENSITIVITY</span>
+    <input type="range" id="sl-sens" min="0.1" max="1.0" step="0.05" value="0.55">
+    <span class="ctrl-val" id="vl-sens">0.55</span>
+  </div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const FFT_SIZE   = 8192;
+const NUM_H      = 8;
+const H_NAMES    = ["Fund.","2nd","3rd","4th","5th","6th","7th","8th"];
+const SCROLL_PX_PER_FRAME = 1; // spectrogram scroll speed
+const BEAT_SMOOTH = 12;
+
+// dB → colour (deep blue → cyan → green → yellow → red)
+function dbToColor(db) {
+  // db range: -96 to 0
+  const t = Math.max(0, Math.min(1, (db + 96) / 96));
+  if (t < 0.25) {
+    const s = t / 0.25;
+    return [Math.round(s*0), Math.round(s*40), Math.round(40 + s*160)];
+  } else if (t < 0.5) {
+    const s = (t-0.25)/0.25;
+    return [0, Math.round(40+s*180), Math.round(200-s*150)];
+  } else if (t < 0.75) {
+    const s = (t-0.5)/0.25;
+    return [Math.round(s*255), 220, Math.round(50-s*50)];
+  } else {
+    const s = (t-0.75)/0.25;
+    return [255, Math.round(220-s*180), 0];
+  }
+}
+
+// ── State ──────────────────────────────────────────────────
+let micOn      = false;
+let gainVal    = 2.0;
+let sensVal    = 0.55;
+let selH       = new Array(NUM_H).fill(false);
+selH[0]        = true; // fundamental selected by default
+let beatHistory= Array.from({length:NUM_H}, ()=>[]);
+let beatVals   = new Array(NUM_H).fill(null);
+let statusVals = new Array(NUM_H).fill(0);
+
+let audioCtx   = null;
+let analyser   = null;
+let gainNode   = null;
+let stream     = null;
+let fftData    = null;
+let rafId      = null;
+let lastFreq   = null;
+
+// Per-harmonic offscreen canvases (scrolling spectrogram)
+const offscreens = [];
+const offCtxs    = [];
+const panelCanvases = [];
+const panelCtxs  = [];
+
+// ── Build harmonic rows ────────────────────────────────────
+const spectroWrap = document.getElementById("spectro-wrap");
+const beatBar     = document.getElementById("beat-bar");
+const hrBtns      = [];
+const beatCards   = [];
+const beatOverlays= [];
+
+for (let h = NUM_H-1; h >= 0; h--) {
+  // Row
+  const row = document.createElement("div");
+  row.className = "harmonic-row";
+  row.style.minHeight = "52px";
+
+  // Label
+  const lbl = document.createElement("div");
+  lbl.className = "hr-label";
+  lbl.innerHTML = `<span class="hl-name" id="hn${h}">${H_NAMES[h]}</span><span class="hl-freq" id="hf${h}">—</span>`;
+  row.appendChild(lbl);
+
+  // Canvas wrap
+  const cw = document.createElement("div");
+  cw.className = "hr-canvas-wrap";
+  const cv = document.createElement("canvas");
+  cv.className = "hr-canvas";
+  cv.id = `hc${h}`;
+  cw.appendChild(cv);
+  row.appendChild(cw);
+
+  // Beat overlay inside panel
+  const bo = document.createElement("div");
+  bo.className = "beat-overlay";
+  bo.id = `bo${h}`;
+  cw.appendChild(bo);
+
+  // Select button
+  const btn = document.createElement("button");
+  btn.className = "hr-btn" + (h===0 ? " active" : "");
+  btn.innerHTML = `<span style="font-size:9px">H${h+1}</span><span style="font-size:9px">${h===0?"SEL":"—"}</span>`;
+  btn.dataset.h = h;
+  btn.addEventListener("click", () => toggleH(h));
+  row.appendChild(btn);
+  hrBtns[h] = btn;
+
+  spectroWrap.appendChild(row);
+  panelCanvases[h] = cv;
+}
+
+// Beat cards (bottom bar)
+for (let h = 0; h < NUM_H; h++) {
+  const card = document.createElement("div");
+  card.className = "beat-card";
+  card.id = `bcard${h}`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}">—</div><div class="bc-unit">beat/s</div>`;
+  beatBar.appendChild(card);
+  beatCards[h] = card;
+}
+
+// Init offscreen canvases after layout
+function initOffscreens() {
+  for (let h = 0; h < NUM_H; h++) {
+    const cv = panelCanvases[h];
+    const w  = cv.clientWidth  || 300;
+    const h2 = cv.clientHeight || 52;
+    const dpr = window.devicePixelRatio || 1;
+    cv.width  = w * dpr;
+    cv.height = h2 * dpr;
+    panelCtxs[h] = cv.getContext("2d");
+
+    const off = document.createElement("canvas");
+    off.width  = w * dpr;
+    off.height = h2 * dpr;
+    offscreens[h] = off;
+    offCtxs[h]    = off.getContext("2d");
+    // Fill black
+    offCtxs[h].fillStyle = "#000";
+    offCtxs[h].fillRect(0, 0, off.width, off.height);
+  }
+}
+setTimeout(initOffscreens, 100);
+window.addEventListener("resize", initOffscreens);
+
+// ── Mic ────────────────────────────────────────────────────
+document.getElementById("mic-btn").addEventListener("click", () => {
+  micOn ? stopMic() : startMic();
+});
+
+async function startMic() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { alert("Web Audio API not supported."); return; }
+    stream   = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+    });
+    audioCtx = new AC({ sampleRate: 44100 });
+    if (audioCtx.state === "suspended") await audioCtx.resume();
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = gainVal;
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.75;
+    fftData  = new Float32Array(analyser.frequencyBinCount);
+    audioCtx.createMediaStreamSource(stream).connect(gainNode);
+    gainNode.connect(analyser);
+    document.getElementById("sr-label").textContent = audioCtx.sampleRate + " Hz";
+    setMicUI(true);
+    renderLoop();
+  } catch(e) {
+    alert(e.name === "NotAllowedError"
+      ? "Microphone access denied.\nCheck Safari Settings → Microphone."
+      : "Error: " + e.message);
+  }
+}
+
+function stopMic() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  stream?.getTracks().forEach(t=>t.stop()); stream = null;
+  audioCtx?.close().catch(()=>{}); audioCtx = null;
+  analyser = null;
+  setMicUI(false);
+  resetState();
+}
+
+function setMicUI(on) {
+  micOn = on;
+  const btn = document.getElementById("mic-btn");
+  btn.textContent = on ? "🎙 MIC ON" : "🔇 MIC OFF";
+  btn.className   = on ? "on" : "";
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && audioCtx?.state === "suspended") audioCtx.resume().catch(()=>{});
+});
+
+// ── Pitch detection ────────────────────────────────────────
+function detectPitch(data, sr) {
+  const binSize = sr / FFT_SIZE;
+  const thresh  = -100 + sensVal * 65;
+  let maxVal = -Infinity, maxBin = 0;
+  const lo = Math.floor(27.5 / binSize);
+  const hi = Math.min(Math.floor(4200 / binSize), data.length-1);
+  for (let i = lo; i <= hi; i++) {
+    if (data[i] > maxVal) { maxVal = data[i]; maxBin = i; }
+  }
+  if (maxVal < thresh) return null;
+  const prev  = maxBin > 0         ? data[maxBin-1] : data[maxBin];
+  const next  = maxBin < data.length-1 ? data[maxBin+1] : data[maxBin];
+  const denom = prev - 2*maxVal + next;
+  const delta = Math.abs(denom) > 0.001 ? 0.5*(prev-next)/denom : 0;
+  return (maxBin + delta) * binSize;
+}
+
+function detectBeat(data, sr, hFreq) {
+  if (!hFreq) return null;
+  const binSize = sr / FFT_SIZE;
+  const winHz   = Math.max(15, hFreq * 0.013);
+  const cBin    = Math.round(hFreq / binSize);
+  const wBins   = Math.max(4, Math.round(winHz / binSize));
+  const s = Math.max(1, cBin - wBins);
+  const e = Math.min(data.length-2, cBin + wBins);
+  const peaks = [];
+  for (let i = s; i <= e; i++) {
+    if (data[i] > data[i-1] && data[i] > data[i+1] && data[i] > -78) {
+      peaks.push({ f: i*binSize, v: data[i] });
+    }
+  }
+  peaks.sort((a,b)=>b.v-a.v);
+  if (peaks.length < 2) return null;
+  return Math.abs(peaks[0].f - peaks[1].f);
+}
+
+function freqToNote(freq) {
+  if (!freq || freq < 27.5 || freq > 4978) return null;
+  const midi    = 69 + 12 * Math.log2(freq / 440);
+  const rounded = Math.round(midi);
+  if (rounded < 33 || rounded > 108) return null;
+  const octave  = Math.floor(rounded / 12) - 1;
+  const name    = NOTE_NAMES[rounded % 12] + octave;
+  const cents   = (midi - rounded) * 100;
+  return { name, cents, midiFreq: 440 * Math.pow(2,(rounded-69)/12) };
+}
+
+// ── Render loop ────────────────────────────────────────────
+function renderLoop() {
+  rafId = requestAnimationFrame(renderLoop);
+  if (!analyser || !fftData) return;
+
+  const sr = audioCtx?.sampleRate || 44100;
+  analyser.getFloatFrequencyData(fftData);
+
+  const freq = detectPitch(fftData, sr);
+  if (freq) lastFreq = freq;
+
+  // Input level
+  let peak = -Infinity;
+  for (let i = 0; i < fftData.length; i++) if (fftData[i] > peak) peak = fftData[i];
+  updateLevel(peak);
+
+  // Note display
+  if (freq) updateNoteDisplay(freq);
+
+  // Per-harmonic
+  const binSize = sr / FFT_SIZE;
+  for (let h = 0; h < NUM_H; h++) {
+    const hFreq = freq ? freq * (h+1) : null;
+
+    // Update label
+    const fEl = document.getElementById(`hf${h}`);
+    if (fEl) fEl.textContent = hFreq ? hFreq.toFixed(1)+" Hz" : "—";
+
+    // Beat
+    const beat = detectBeat(fftData, sr, hFreq);
+    beatVals[h] = beat;
+    if (beat !== null) {
+      beatHistory[h].push(beat);
+      if (beatHistory[h].length > BEAT_SMOOTH) beatHistory[h].shift();
+      statusVals[h] = beat < 0.1 ? 2 : beat < 0.8 ? 1 : 0;
+    } else {
+      beatHistory[h] = [];
+      statusVals[h]  = 0;
+    }
+
+    // Draw spectrogram column
+    drawSpectroColumn(h, hFreq, binSize);
+  }
+
+  updateBeatDisplay();
+}
+
+// ── Spectrogram drawing ────────────────────────────────────
+function drawSpectroColumn(h, hFreq, binSize) {
+  const off = offscreens[h];
+  const ctx = offCtxs[h];
+  const cv  = panelCanvases[h];
+  const pCtx= panelCtxs[h];
+  if (!off || !ctx || !cv || !pCtx) return;
+
+  const W = off.width, H = off.height;
+  const dpr = window.devicePixelRatio || 1;
+
+  // Scroll left by 1 scaled pixel
+  const shift = SCROLL_PX_PER_FRAME * dpr;
+  ctx.drawImage(off, -shift, 0);
+
+  if (hFreq) {
+    const halfHz = Math.max(20, hFreq * 0.015);
+    const fLo    = hFreq - halfHz;
+    const fHi    = hFreq + halfHz;
+    const bLo    = Math.max(0, Math.floor(fLo / binSize));
+    const bHi    = Math.min(fftData.length-1, Math.ceil(fHi / binSize));
+    const nBins  = Math.max(1, bHi - bLo);
+
+    // Draw new column on right edge
+    const colW = shift + 1;
+    const x    = W - colW;
+
+    for (let i = 0; i < nBins; i++) {
+      const db  = fftData[bLo + i];
+      const [r,g,b] = dbToColor(db);
+      const y   = H - Math.round((i / nBins) * H) - 1;
+      const bh  = Math.max(1, Math.round(H / nBins));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(x, y, colW, bh);
+    }
+
+    // Yellow center line (fundamental of harmonic)
+    const centerY = H / 2;
+    ctx.strokeStyle = "rgba(255,220,0,0.35)";
+    ctx.lineWidth   = dpr;
+    ctx.beginPath();
+    ctx.moveTo(x, centerY - 1);
+    ctx.lineTo(x + colW, centerY - 1);
+    ctx.stroke();
+  } else {
+    // No signal — fill black column
+    ctx.fillStyle = "#000";
+    ctx.fillRect(W - shift - 1, 0, shift + 1, H);
+  }
+
+  // Blit offscreen → panel canvas
+  pCtx.drawImage(off, 0, 0);
+
+  // Selection / match highlight
+  const sel = selH[h];
+  const st  = statusVals[h];
+  if (sel || st > 0) {
+    const col = st===2 ? "rgba(0,255,60,0.25)"
+              : st===1 ? "rgba(255,200,0,0.15)"
+              : "rgba(255,255,255,0.06)";
+    pCtx.fillStyle = col;
+    pCtx.fillRect(0, 0, cv.width, cv.height);
+  }
+  // Border
+  if (st === 2) {
+    pCtx.strokeStyle = "rgba(0,255,60,0.9)";
+    pCtx.lineWidth   = 2 * dpr;
+    pCtx.strokeRect(1, 1, cv.width-2, cv.height-2);
+  }
+}
+
+// ── UI updates ─────────────────────────────────────────────
+function updateNoteDisplay(freq) {
+  const note = freqToNote(freq);
+  const nb = document.getElementById("note-big");
+  const ns = document.getElementById("note-sub");
+  const cv = document.getElementById("cents-val");
+  const mn = document.getElementById("meter-needle");
+
+  if (note) {
+    nb.textContent   = note.name;
+    nb.style.color   = "#fff";
+    ns.textContent   = `${freq.toFixed(2)} Hz  ${note.cents>=0?"+":""}${note.cents.toFixed(1)}¢`;
+    ns.style.color   = "#aaa";
+    cv.textContent   = `${note.cents>=0?"+":""}${note.cents.toFixed(1)} cent`;
+    // Needle: cents ±50 maps to 0–100%
+    const pct = 50 + Math.max(-50, Math.min(50, note.cents));
+    mn.style.left    = pct + "%";
+  } else {
+    nb.textContent   = "—";
+    nb.style.color   = "#444";
+    ns.textContent   = "— Hz";
+    ns.style.color   = "#444";
+    cv.textContent   = "—";
+    mn.style.left    = "50%";
+  }
+}
+
+function updateLevel(db) {
+  const bar  = document.getElementById("level-bar");
+  const lbl  = document.getElementById("level-db");
+  const pct  = Math.max(0, Math.min(100, (db + 96) / 96 * 100));
+  bar.style.width    = pct + "%";
+  lbl.textContent    = isFinite(db) ? db.toFixed(1) + " dB" : "— dB";
+}
+
+function updateBeatDisplay() {
+  for (let h = 0; h < NUM_H; h++) {
+    const card = beatCards[h];
+    const on   = selH[h];
+    card.style.display = on ? "block" : "none";
+    if (!on) continue;
+
+    const hist = beatHistory[h];
+    const valEl= document.getElementById(`bcv${h}`);
+    const st   = statusVals[h];
+    const col  = st===2 ? "#00ff55" : st===1 ? "#ffdd00" : "#ff8844";
+
+    card.style.borderColor = st===2 ? "#00cc44" : st===1 ? "#cc9900" : "#333";
+    valEl.style.color = col;
+
+    if (hist.length === 0) {
+      valEl.textContent = "—";
+    } else {
+      const avg = hist.reduce((a,v)=>a+v,0) / hist.length;
+      valEl.textContent = avg < 0.05 ? "0.00" : avg.toFixed(2);
+    }
+
+    // Beat overlay inside panel
+    const bo = document.getElementById(`bo${h}`);
+    if (bo) {
+      if (hist.length > 0) {
+        const avg = hist.reduce((a,v)=>a+v,0) / hist.length;
+        bo.textContent = (avg < 0.05 ? "0.00" : avg.toFixed(2)) + " b/s";
+        bo.style.display = "block";
+        bo.style.color = st===2 ? "#00ff55" : st===1 ? "#ffdd00" : "#ff8844";
+      } else {
+        bo.style.display = "none";
+      }
+    }
+  }
+}
+
+function toggleH(h) {
+  selH[h] = !selH[h];
+  const btn = hrBtns[h];
+  btn.className = "hr-btn" + (selH[h] ? " active" : "");
+  btn.innerHTML = `<span style="font-size:9px">H${h+1}</span><span style="font-size:9px">${selH[h]?"SEL":"—"}</span>`;
+}
+
+function resetState() {
+  beatVals    = new Array(NUM_H).fill(null);
+  statusVals  = new Array(NUM_H).fill(0);
+  beatHistory = Array.from({length:NUM_H}, ()=>[]);
+  updateNoteDisplay(null);
+  updateLevel(-Infinity);
+  updateBeatDisplay();
+}
+
+// ── Sliders ────────────────────────────────────────────────
+document.getElementById("sl-gain").addEventListener("input", function() {
+  gainVal = parseFloat(this.value);
+  document.getElementById("vl-gain").textContent = gainVal.toFixed(1);
+  if (gainNode) gainNode.gain.value = gainVal;
+});
+document.getElementById("sl-sens").addEventListener("input", function() {
+  sensVal = parseFloat(this.value);
+  document.getElementById("vl-sens").textContent = sensVal.toFixed(2);
+});
+</script>
+
+</body>
+</html>
