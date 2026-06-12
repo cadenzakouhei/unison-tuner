@@ -10,15 +10,20 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
+html, body {
+height: 100%;
+overflow: hidden; /* prevent page scroll */
+}
+
 body {
 background: #111;
 color: #fff;
 font-family: -apple-system, ‘Helvetica Neue’, sans-serif;
-min-height: 100dvh;
+height: 100dvh;
 display: flex;
 flex-direction: column;
 font-size: 13px;
-overflow-x: hidden;
+overflow: hidden;
 }
 
 /* ── Header ── */
@@ -29,6 +34,7 @@ padding: 8px 12px;
 display: flex;
 flex-direction: column;
 gap: 6px;
+flex-shrink: 0;
 }
 #title-row {
 display: flex;
@@ -119,6 +125,7 @@ color: #888;
 display: flex;
 justify-content: space-between;
 align-items: center;
+flex-shrink: 0;
 }
 
 /* ── Harmonic select buttons ── */
@@ -129,6 +136,7 @@ padding: 6px 10px;
 display: flex;
 gap: 5px;
 align-items: center;
+flex-shrink: 0;
 }
 #harmonic-select .hs-label {
 font-size: 11px;
@@ -153,105 +161,79 @@ user-select: none;
 }
 .hs-btn.selected {
 background: #1a2a00;
-border-color: #556600;
+border-color: #ccff00;
 color: #ccff00;
 }
 
-/* ── Spectrogram panels ── */
+/* ── Single spectrogram ── */
+#spectro-section {
+flex: 1;
+display: flex;
+flex-direction: column;
+overflow: hidden;
+min-height: 0;
+}
 #spectro-outer {
 flex: 1;
 display: flex;
 overflow: hidden;
-}
-#spectro-wrap {
-flex: 1;
-display: flex;
-flex-direction: column;
-background: #000;
-overflow: hidden;
-}
-.harmonic-row {
-display: flex;
-align-items: stretch;
-border-bottom: 1px solid #1a1a1a;
-flex: 1;
+min-height: 0;
 position: relative;
 }
-.hr-label {
-width: 54px;
-flex-shrink: 0;
-background: #0d0d0d;
-border-right: 1px solid #222;
-display: flex;
-flex-direction: column;
-justify-content: center;
-align-items: flex-start;
-padding: 2px 6px;
-}
-.hr-label .hl-name { font-size: 12px; font-weight: 600; color: #ccc; }
-.hr-label .hl-freq { font-size: 10px; color: #666; }
-.hr-canvas-wrap {
+#spectro-canvas-wrap {
 flex: 1;
-overflow: hidden;
 position: relative;
+overflow: hidden;
 }
-.hr-canvas {
+#spectro-canvas {
 position: absolute;
 top: 0; left: 0;
 width: 100%; height: 100%;
 }
-/* Yellow border when selected */
-.hr-canvas-wrap.selected::after {
-content: ‘’;
+/* Freq axis labels */
+#freq-axis {
 position: absolute;
-inset: 0;
-border: 2px solid #ccff00;
+top: 0; left: 0;
+width: 100%; height: 100%;
 pointer-events: none;
-z-index: 2;
 }
-/* Green border on match */
-.hr-canvas-wrap.match::after {
-content: ‘’;
+.freq-label {
 position: absolute;
-inset: 0;
-border: 2px solid #00ff55;
-pointer-events: none;
-z-index: 2;
-}
-/* Beat overlay inside panel */
-.beat-overlay {
-position: absolute;
-top: 3px; right: 4px;
-background: rgba(0,0,0,0.7);
-border-radius: 4px;
-padding: 1px 5px;
-font-size: 12px;
-font-weight: bold;
-pointer-events: none;
-display: none;
-z-index: 3;
+left: 4px;
+font-size: 9px;
+color: rgba(255,255,255,0.5);
+transform: translateY(-50%);
+white-space: nowrap;
 }
 
 /* dB scale */
 #db-scale {
-width: 22px;
+width: 32px;
 flex-shrink: 0;
 display: flex;
 flex-direction: column;
-justify-content: space-between;
 padding: 2px 0;
 background: #000;
 border-left: 1px solid #222;
+position: relative;
 }
 #db-gradient {
-width: 10px;
-margin: 0 auto;
 flex: 1;
+margin: 0 6px;
 background: linear-gradient(to bottom,
-#ff0000 0%, #ff4400 10%, #ff8800 20%,
-#ffcc00 30%, #aaff00 40%, #00ff44 50%,
-#00aaff 65%, #0044ff 80%, #000066 100%);
+#ff0000 0%, #ff4400 8%, #ff8800 16%,
+#ffcc00 25%, #aaff00 35%, #00ff88 45%,
+#00ccff 55%, #0066ff 70%, #0000aa 85%, #000033 100%);
 border-radius: 2px;
+position: relative;
+}
+.db-tick {
+position: absolute;
+right: -18px;
+font-size: 8px;
+color: #aaa;
+transform: translateY(-50%);
+white-space: nowrap;
 }
 
 /* ── Beat display bar ── */
@@ -264,6 +246,7 @@ gap: 5px;
 flex-wrap: wrap;
 min-height: 58px;
 align-items: center;
+flex-shrink: 0;
 }
 #beat-bar-empty {
 font-size: 12px;
@@ -293,6 +276,7 @@ padding: 8px 12px;
 display: flex;
 flex-direction: column;
 gap: 8px;
+flex-shrink: 0;
 }
 .ctrl-row { display: flex; align-items: center; gap: 8px; }
 .ctrl-label { font-size: 11px; color: #666; min-width: 84px; letter-spacing: 0.5px; }
@@ -334,10 +318,10 @@ gap: 8px;
   </div>
 </div>
 
-<!-- Section: FFT -->
+<!-- FFT section label -->
 
 <div class="section-label">
-  <span>FFT / Spectrogram  (H1–H8)</span>
+  <span>FFT / Spectrogram (H1–H8)</span>
   <span id="sr-label">44100 Hz</span>
 </div>
 
@@ -347,14 +331,28 @@ gap: 8px;
   <span class="hs-label">Select:</span>
 </div>
 
-<!-- Spectrogram + dB scale -->
+<!-- Spectrogram -->
 
-<div id="spectro-outer">
-  <div id="spectro-wrap"></div>
-  <div id="db-scale">
-    <div style="font-size:9px;color:#888;text-align:center;padding-top:2px;">0</div>
-    <div id="db-gradient"></div>
-    <div style="font-size:9px;color:#888;text-align:center;padding-bottom:2px;">-96</div>
+<div id="spectro-section">
+  <div id="spectro-outer">
+    <div id="spectro-canvas-wrap">
+      <canvas id="spectro-canvas"></canvas>
+      <div id="freq-axis"></div>
+    </div>
+    <div id="db-scale">
+      <div style="font-size:8px;color:#888;text-align:center;padding-top:2px;flex-shrink:0;">0</div>
+      <div id="db-gradient">
+        <div class="db-tick" style="top:0%">0</div>
+        <div class="db-tick" style="top:12%">-12</div>
+        <div class="db-tick" style="top:25%">-24</div>
+        <div class="db-tick" style="top:37%">-36</div>
+        <div class="db-tick" style="top:50%">-48</div>
+        <div class="db-tick" style="top:62%">-60</div>
+        <div class="db-tick" style="top:75%">-72</div>
+        <div class="db-tick" style="top:87%">-84</div>
+      </div>
+      <div style="font-size:8px;color:#888;text-align:center;padding-bottom:2px;flex-shrink:0;">-96</div>
+    </div>
   </div>
 </div>
 
@@ -379,44 +377,59 @@ gap: 8px;
 </div>
 
 <script>
-// ── Constants ──────────────────────────────────────────────
 const NOTE_NAMES  = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-const FFT_SIZE    = 16384;   // larger = finer frequency resolution
+const FFT_SIZE    = 16384;
 const NUM_H       = 8;
-const H_NAMES     = ["Fund.","2nd","3rd","4th","5th","6th","7th","8th"];
-const BEAT_SMOOTH = 16;
-const SCROLL_SPD  = 1;       // px per frame (logical)
+const BEAT_SMOOTH = 20;
+const BEAT_NULL_THRESH = 30;
+const SCROLL_SPD  = 1;
 
-// dB → RGB colour  (black→blue→cyan→green→yellow→red)
+// Vivid colour map: black→blue→cyan→green→yellow→red (like reference image)
 function dbToRGB(db) {
   const t = Math.max(0, Math.min(1, (db + 96) / 96));
-  if (t < 0.20) { const s=t/0.20;       return [0,         Math.round(s*30),  Math.round(s*120)]; }
-  if (t < 0.40) { const s=(t-0.20)/0.20;return [0,         Math.round(30+s*170), Math.round(120+s*80)]; }
-  if (t < 0.60) { const s=(t-0.40)/0.20;return [0,         Math.round(200+s*55), Math.round(200-s*180)]; }
-  if (t < 0.80) { const s=(t-0.60)/0.20;return [Math.round(s*255), 255,        Math.round(20-s*20)]; }
-  {              const s=(t-0.80)/0.20;  return [255,       Math.round(255-s*220), 0]; }
+  // 5-stop gradient for vivid contrast
+  if (t < 0.15) {
+    const s = t / 0.15;
+    return [0, 0, Math.round(s * 180)];
+  } else if (t < 0.35) {
+    const s = (t - 0.15) / 0.20;
+    return [0, Math.round(s * 220), Math.round(180 + s * 55)];
+  } else if (t < 0.55) {
+    const s = (t - 0.35) / 0.20;
+    return [Math.round(s * 50), 220, Math.round(235 - s * 235)];
+  } else if (t < 0.75) {
+    const s = (t - 0.55) / 0.20;
+    return [Math.round(50 + s * 205), Math.round(220 - s * 20), 0];
+  } else {
+    const s = (t - 0.75) / 0.25;
+    return [255, Math.round(200 - s * 200), 0];
+  }
 }
 
 // ── State ──────────────────────────────────────────────────
-let micOn       = false;
-let gainVal     = 2.0;
-let sensVal     = 0.55;
-let selH        = new Array(NUM_H).fill(false);
-let beatHistory = Array.from({length:NUM_H}, ()=>[]);
-let beatVals    = new Array(NUM_H).fill(null);
-let statusVals  = new Array(NUM_H).fill(0);
+let micOn        = false;
+let gainVal      = 2.0;
+let sensVal      = 0.55;
+let selH         = new Array(NUM_H).fill(false);
+let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
+let beatNullCount= new Array(NUM_H).fill(0);
+let statusVals   = new Array(NUM_H).fill(0);
+let currentFreq  = null;
+// Auto-zoom: displayed freq range
+let dispFreqLo   = 20;
+let dispFreqHi   = 4000;
+let targetFreqLo = 20;
+let targetFreqHi = 4000;
 
-let beatNullCount = new Array(NUM_H).fill(0);
-const BEAT_NULL_THRESHOLD = 20; // frames before clearing
+let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 
-// Per-harmonic canvas refs
-const panelWraps   = [];   // .hr-canvas-wrap div
-const panelCanvases= [];   // visible canvas
-const panelCtxs    = [];
-const offscreens   = [];
-const offCtxs      = [];
-const hsBtns       = [];   // select buttons
-const beatCards    = [];
+// Single offscreen canvas for scrolling spectrogram
+let offCanvas = null, offCtx = null;
+const spectroCanvas = document.getElementById("spectro-canvas");
+const spectroCtx    = spectroCanvas.getContext("2d");
+const freqAxisEl    = document.getElementById("freq-axis");
+const hsBtns        = [];
+const beatCards     = [];
 
 // ── Build harmonic select buttons ─────────────────────────
 const hSelWrap = document.getElementById("harmonic-select");
@@ -427,40 +440,6 @@ for (let h = 0; h < NUM_H; h++) {
   btn.addEventListener("click", ()=>toggleH(h));
   hSelWrap.appendChild(btn);
   hsBtns[h] = btn;
-}
-
-// ── Build spectrogram rows ─────────────────────────────────
-const spectroWrap = document.getElementById("spectro-wrap");
-for (let h = NUM_H-1; h >= 0; h--) {
-  const row = document.createElement("div");
-  row.className = "harmonic-row";
-  row.style.minHeight = "50px";
-
-  const lbl = document.createElement("div");
-  lbl.className = "hr-label";
-  lbl.innerHTML = `<span class="hl-name">${H_NAMES[h]}</span><span class="hl-freq" id="hf${h}">—</span>`;
-  row.appendChild(lbl);
-
-  const cw = document.createElement("div");
-  cw.className = "hr-canvas-wrap";
-  cw.id = `cw${h}`;
-
-  const cv = document.createElement("canvas");
-  cv.className = "hr-canvas";
-  cv.id = `hc${h}`;
-  cw.appendChild(cv);
-
-  // Beat overlay
-  const bo = document.createElement("div");
-  bo.className = "beat-overlay";
-  bo.id = `bo${h}`;
-  cw.appendChild(bo);
-
-  row.appendChild(cw);
-  spectroWrap.appendChild(row);
-
-  panelWraps[h]    = cw;
-  panelCanvases[h] = cv;
 }
 
 // ── Build beat cards ───────────────────────────────────────
@@ -475,28 +454,27 @@ for (let h = 0; h < NUM_H; h++) {
   beatCards[h] = card;
 }
 
-// ── Init offscreen canvases ────────────────────────────────
-function initOffscreens() {
+// ── Init canvas ────────────────────────────────────────────
+function initCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  for (let h = 0; h < NUM_H; h++) {
-    const cv = panelCanvases[h];
-    const w  = Math.max(cv.clientWidth,  200);
-    const hh = Math.max(cv.clientHeight, 50);
-    cv.width  = w  * dpr;
-    cv.height = hh * dpr;
-    panelCtxs[h] = cv.getContext("2d");
+  const w   = spectroCanvas.parentElement.clientWidth  || 320;
+  const h   = spectroCanvas.parentElement.clientHeight || 300;
+  spectroCanvas.width  = w * dpr;
+  spectroCanvas.height = h * dpr;
+  spectroCanvas.style.width  = w + "px";
+  spectroCanvas.style.height = h + "px";
 
-    const off = document.createElement("canvas");
-    off.width  = w  * dpr;
-    off.height = hh * dpr;
-    offscreens[h] = off;
-    offCtxs[h]    = off.getContext("2d");
-    offCtxs[h].fillStyle = "#000";
-    offCtxs[h].fillRect(0, 0, off.width, off.height);
-  }
+  offCanvas        = document.createElement("canvas");
+  offCanvas.width  = w * dpr;
+  offCanvas.height = h * dpr;
+  offCtx           = offCanvas.getContext("2d");
+  offCtx.fillStyle = "#000";
+  offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+
+  updateFreqAxisLabels();
 }
-setTimeout(initOffscreens, 150);
-window.addEventListener("resize", initOffscreens);
+setTimeout(initCanvas, 150);
+window.addEventListener("resize", initCanvas);
 
 // ── Mic ────────────────────────────────────────────────────
 document.getElementById("mic-btn").addEventListener("click", ()=> micOn ? stopMic() : startMic());
@@ -514,7 +492,7 @@ async function startMic() {
     gainNode.gain.value = gainVal;
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.78;
+    analyser.smoothingTimeConstant = 0.80;
     fftData  = new Float32Array(analyser.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
@@ -527,7 +505,6 @@ async function startMic() {
       : "Error: " + e.message);
   }
 }
-
 function stopMic() {
   if (rafId) { cancelAnimationFrame(rafId); rafId=null; }
   stream?.getTracks().forEach(t=>t.stop()); stream=null;
@@ -584,6 +561,23 @@ function freqToNote(freq) {
   return { name: NOTE_NAMES[r%12]+(Math.floor(r/12)-1), cents:(midi-r)*100 };
 }
 
+// ── Auto-zoom: smooth freq range update ───────────────────
+function updateFreqRange(freq) {
+  if (!freq) return;
+  // Show from slightly below fundamental to just above 8th harmonic
+  const lo = freq * 0.7;
+  const hi = freq * 8.5;
+  targetFreqLo = lo;
+  targetFreqHi = hi;
+}
+
+// Smooth zoom interpolation
+function smoothZoom() {
+  const alpha = 0.04; // slow smooth
+  dispFreqLo += (targetFreqLo - dispFreqLo) * alpha;
+  dispFreqHi += (targetFreqHi - dispFreqHi) * alpha;
+}
+
 // ── Render loop ────────────────────────────────────────────
 function renderLoop() {
   rafId = requestAnimationFrame(renderLoop);
@@ -591,116 +585,129 @@ function renderLoop() {
   const sr = audioCtx?.sampleRate||44100;
   analyser.getFloatFrequencyData(fftData);
 
-  // Level
   let peak=-Infinity;
   for (let i=0;i<fftData.length;i++) if(fftData[i]>peak) peak=fftData[i];
   updateLevel(peak);
 
   const freq = detectPitch(fftData, sr);
-  if (freq) updateNoteDisplay(freq);
+  if (freq) {
+    currentFreq = freq;
+    updateNoteDisplay(freq);
+    updateFreqRange(freq);
+  }
+  smoothZoom();
 
   const binSize = sr / FFT_SIZE;
 
+  // Beat detection per harmonic
   for (let h=0; h<NUM_H; h++) {
-    const hFreq = freq ? freq*(h+1) : null;
-    const fEl   = document.getElementById(`hf${h}`);
-    if (fEl) fEl.textContent = hFreq ? hFreq.toFixed(1)+" Hz" : "—";
-
-    // Beat detection
-    const beat = detectBeat(fftData, sr, hFreq);
-    beatVals[h] = beat;
+    const hFreq = currentFreq ? currentFreq*(h+1) : null;
+    const beat  = detectBeat(fftData, sr, hFreq);
     if (beat!==null) {
-      beatNullCount[h] = 0;
+      beatNullCount[h]=0;
       beatHistory[h].push(beat);
       if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
       statusVals[h] = beat<0.08?2:beat<0.6?1:0;
     } else {
       beatNullCount[h]++;
-      if (beatNullCount[h] > BEAT_NULL_THRESHOLD) {
-        beatHistory[h]=[]; statusVals[h]=0;
-      }
+      if (beatNullCount[h]>BEAT_NULL_THRESH) { beatHistory[h]=[]; statusVals[h]=0; }
     }
-
-    drawSpectroColumn(h, hFreq, binSize);
   }
+
+  drawSpectroColumn(binSize);
   updateBeatDisplay();
+  updateFreqAxisLabels();
 }
 
-// ── Fine spectrogram ───────────────────────────────────────
-function drawSpectroColumn(h, hFreq, binSize) {
-  const off=offscreens[h], ctx=offCtxs[h];
-  const cv=panelCanvases[h], pCtx=panelCtxs[h];
-  if (!off||!ctx||!cv||!pCtx) return;
-
-  const W=off.width, H=off.height;
-  const dpr=window.devicePixelRatio||1;
-  const shift=SCROLL_SPD*dpr;
+// ── Single spectrogram column ──────────────────────────────
+function drawSpectroColumn(binSize) {
+  if (!offCanvas||!offCtx) return;
+  const W   = offCanvas.width;
+  const H   = offCanvas.height;
+  const dpr = window.devicePixelRatio||1;
+  const shift = SCROLL_SPD * dpr;
 
   // Scroll left
-  ctx.drawImage(off, -shift, 0);
+  offCtx.drawImage(offCanvas, -shift, 0);
 
-  const colX = W - shift - 1;
-  const colW = shift + 2;
+  // New column on right edge using ImageData for per-pixel precision
+  const colW = Math.ceil(shift) + 1;
+  const colX = W - colW;
+  const img  = offCtx.createImageData(colW, H);
+  const d    = img.data;
 
-  if (hFreq) {
-    // Show ±25% around harmonic — wider range like reference image
-    const halfHz = hFreq * 0.25;
-    const fLo    = Math.max(0, hFreq - halfHz);
-    const fHi    = hFreq + halfHz;
-    const bLo    = Math.max(0, Math.floor(fLo/binSize));
-    const bHi    = Math.min(fftData.length-1, Math.ceil(fHi/binSize));
-    const nBins  = Math.max(1, bHi-bLo);
-
-    // Use ImageData for pixel-perfect rendering
-    const imgData = ctx.createImageData(Math.ceil(colW), H);
-    const data    = imgData.data;
-
-    for (let py=0; py<H; py++) {
-      // Map pixel row to frequency bin (bottom = low freq, top = high freq)
-      const binIdx = bLo + Math.floor((1 - py/H) * nBins);
-      const db     = fftData[Math.min(bHi, Math.max(bLo, binIdx))];
-      const [r,g,b] = dbToRGB(db);
-      const idx    = py * Math.ceil(colW) * 4;
-      for (let px=0; px<Math.ceil(colW); px++) {
-        const i = idx + px*4;
-        data[i]   = r;
-        data[i+1] = g;
-        data[i+2] = b;
-        data[i+3] = 255;
-      }
+  for (let py = 0; py < H; py++) {
+    // Map pixel row → frequency (bottom = low, top = high)
+    const frac = 1 - py / H;
+    const freq = dispFreqLo + frac * (dispFreqHi - dispFreqLo);
+    const bin  = Math.round(freq / binSize);
+    const db   = (bin >= 0 && bin < fftData.length) ? fftData[bin] : -96;
+    const [r,g,b] = dbToRGB(db);
+    for (let px = 0; px < colW; px++) {
+      const i = (py * colW + px) * 4;
+      d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255;
     }
-    ctx.putImageData(imgData, colX, 0);
+  }
+  offCtx.putImageData(img, colX, 0);
 
-    // Centre marker (harmonic frequency line)
-    const cy = H/2;
-    ctx.strokeStyle = "rgba(255,220,0,0.3)";
-    ctx.lineWidth = dpr;
-    ctx.beginPath(); ctx.moveTo(colX,cy); ctx.lineTo(colX+colW,cy); ctx.stroke();
-  } else {
-    ctx.fillStyle="#000";
-    ctx.fillRect(colX, 0, colW, H);
+  // Harmonic frequency lines (faint horizontal)
+  if (currentFreq) {
+    for (let h=0; h<NUM_H; h++) {
+      const hf  = currentFreq * (h+1);
+      const frac = (hf - dispFreqLo) / (dispFreqHi - dispFreqLo);
+      if (frac < 0 || frac > 1) continue;
+      const py  = H * (1 - frac);
+      const selected = selH[h];
+      offCtx.strokeStyle = selected ? "rgba(200,255,0,0.5)" : "rgba(255,220,0,0.18)";
+      offCtx.lineWidth   = selected ? 1.5*dpr : dpr;
+      offCtx.beginPath();
+      offCtx.moveTo(colX, py);
+      offCtx.lineTo(colX+colW, py);
+      offCtx.stroke();
+    }
   }
 
   // Blit to visible canvas
-  pCtx.drawImage(off, 0, 0);
+  spectroCtx.drawImage(offCanvas, 0, 0);
 }
 
-// ── Beat & border display ──────────────────────────────────
+// ── Freq axis labels ───────────────────────────────────────
+let lastAxisUpdate = 0;
+function updateFreqAxisLabels() {
+  const now = Date.now();
+  if (now - lastAxisUpdate < 500) return; // update every 500ms
+  lastAxisUpdate = now;
+
+  freqAxisEl.innerHTML = "";
+  const H = spectroCanvas.clientHeight || 300;
+
+  // Draw harmonic lines as labels
+  if (currentFreq) {
+    for (let h=0; h<NUM_H; h++) {
+      const hf   = currentFreq * (h+1);
+      const frac = (hf - dispFreqLo) / (dispFreqHi - dispFreqLo);
+      if (frac < 0.01 || frac > 0.99) continue;
+      const y    = H * (1 - frac);
+      const lbl  = document.createElement("div");
+      lbl.className = "freq-label";
+      lbl.style.top  = y + "px";
+      lbl.style.color = selH[h] ? "rgba(200,255,0,0.8)" : "rgba(255,220,100,0.4)";
+      lbl.textContent = `H${h+1} ${hf.toFixed(0)}Hz`;
+      freqAxisEl.appendChild(lbl);
+    }
+  }
+}
+
+// ── Beat display ───────────────────────────────────────────
 function updateBeatDisplay() {
   let anySelected = false;
   for (let h=0; h<NUM_H; h++) {
     const on   = selH[h];
     const card = beatCards[h];
-    const wrap = panelWraps[h];
-    const bo   = document.getElementById(`bo${h}`);
     const valEl= document.getElementById(`bcv${h}`);
     const hist = beatHistory[h];
     const st   = statusVals[h];
 
-    // Panel border colour
-    wrap.className = "hr-canvas-wrap" + (on && st===2 ? " match" : on ? " selected" : "");
-
-    // Beat card
     card.style.display = on ? "block" : "none";
     if (on) {
       anySelected = true;
@@ -710,21 +717,9 @@ function updateBeatDisplay() {
       if (hist.length===0) {
         valEl.textContent="—";
       } else {
-        const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
+        const avg = hist.reduce((a,v)=>a+v,0)/hist.length;
         valEl.textContent = avg<0.005?"0.00":avg.toFixed(2);
       }
-
-      // Beat overlay in panel
-      if (bo) {
-        if (hist.length>0) {
-          const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
-          bo.textContent = (avg<0.005?"0.00":avg.toFixed(2))+" b/s";
-          bo.style.display="block";
-          bo.style.color=col;
-        } else { bo.style.display="none"; }
-      }
-    } else {
-      if (bo) bo.style.display="none";
     }
   }
   document.getElementById("beat-bar-empty").style.display = anySelected?"none":"block";
@@ -763,16 +758,13 @@ function updateLevel(db) {
 }
 
 function resetState() {
-  beatVals=new Array(NUM_H).fill(null);
+  currentFreq=null;
   statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]);
   beatNullCount=new Array(NUM_H).fill(0);
+  dispFreqLo=20; dispFreqHi=4000;
+  targetFreqLo=20; targetFreqHi=4000;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
-  for (let h=0;h<NUM_H;h++) {
-    const bo=document.getElementById(`bo${h}`);
-    if(bo) bo.style.display="none";
-    panelWraps[h].className="hr-canvas-wrap";
-  }
 }
 
 // ── Sliders ────────────────────────────────────────────────
