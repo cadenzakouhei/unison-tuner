@@ -406,7 +406,8 @@ let beatHistory = Array.from({length:NUM_H}, ()=>[]);
 let beatVals    = new Array(NUM_H).fill(null);
 let statusVals  = new Array(NUM_H).fill(0);
 
-let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
+let beatNullCount = new Array(NUM_H).fill(0);
+const BEAT_NULL_THRESHOLD = 20; // frames before clearing
 
 // Per-harmonic canvas refs
 const panelWraps   = [];   // .hr-canvas-wrap div
@@ -609,11 +610,15 @@ function renderLoop() {
     const beat = detectBeat(fftData, sr, hFreq);
     beatVals[h] = beat;
     if (beat!==null) {
+      beatNullCount[h] = 0;
       beatHistory[h].push(beat);
       if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
       statusVals[h] = beat<0.08?2:beat<0.6?1:0;
     } else {
-      beatHistory[h]=[]; statusVals[h]=0;
+      beatNullCount[h]++;
+      if (beatNullCount[h] > BEAT_NULL_THRESHOLD) {
+        beatHistory[h]=[]; statusVals[h]=0;
+      }
     }
 
     drawSpectroColumn(h, hFreq, binSize);
@@ -638,27 +643,37 @@ function drawSpectroColumn(h, hFreq, binSize) {
   const colW = shift + 2;
 
   if (hFreq) {
-    // Wider window for finer detail
-    const halfHz = Math.max(10, hFreq * 0.010);
-    const fLo    = hFreq - halfHz;
+    // Show ±25% around harmonic — wider range like reference image
+    const halfHz = hFreq * 0.25;
+    const fLo    = Math.max(0, hFreq - halfHz);
     const fHi    = hFreq + halfHz;
     const bLo    = Math.max(0, Math.floor(fLo/binSize));
     const bHi    = Math.min(fftData.length-1, Math.ceil(fHi/binSize));
     const nBins  = Math.max(1, bHi-bLo);
 
-    // Draw each bin as a pixel-height slice → fine resolution
-    const rowH = H / nBins;
-    for (let i=0; i<nBins; i++) {
-      const db = fftData[bLo+i];
-      const [r,g,b] = dbToRGB(db);
-      const y  = H - (i+1)*rowH;
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(colX, y, colW, Math.max(1, rowH));
-    }
+    // Use ImageData for pixel-perfect rendering
+    const imgData = ctx.createImageData(Math.ceil(colW), H);
+    const data    = imgData.data;
 
-    // Centre marker
+    for (let py=0; py<H; py++) {
+      // Map pixel row to frequency bin (bottom = low freq, top = high freq)
+      const binIdx = bLo + Math.floor((1 - py/H) * nBins);
+      const db     = fftData[Math.min(bHi, Math.max(bLo, binIdx))];
+      const [r,g,b] = dbToRGB(db);
+      const idx    = py * Math.ceil(colW) * 4;
+      for (let px=0; px<Math.ceil(colW); px++) {
+        const i = idx + px*4;
+        data[i]   = r;
+        data[i+1] = g;
+        data[i+2] = b;
+        data[i+3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, colX, 0);
+
+    // Centre marker (harmonic frequency line)
     const cy = H/2;
-    ctx.strokeStyle = "rgba(255,220,0,0.25)";
+    ctx.strokeStyle = "rgba(255,220,0,0.3)";
     ctx.lineWidth = dpr;
     ctx.beginPath(); ctx.moveTo(colX,cy); ctx.lineTo(colX+colW,cy); ctx.stroke();
   } else {
@@ -751,6 +766,7 @@ function resetState() {
   beatVals=new Array(NUM_H).fill(null);
   statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]);
+  beatNullCount=new Array(NUM_H).fill(0);
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
   for (let h=0;h<NUM_H;h++) {
     const bo=document.getElementById(`bo${h}`);
