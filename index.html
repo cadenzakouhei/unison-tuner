@@ -375,36 +375,9 @@ const BEAT_SMOOTH = 20;
 const BEAT_NULL_THRESH = 30;
 const SCROLL_SPD  = 1;
 
-// Colour map matching reference image (blue→cyan→green→yellow→red)
-// Tuned to iPhone mic levels (-96 to -40dB typical range)
-function dbToRGB(db) {
-  // Map -96dB→0, -40dB→1 (compress range for visibility)
-  const t = Math.max(0, Math.min(1, (db + 96) / 56));
-  if (t < 0.20) {
-    // black → blue
-    const s = t / 0.20;
-    return [0, 0, Math.round(s * 255)];
-  } else if (t < 0.40) {
-    // blue → cyan
-    const s = (t - 0.20) / 0.20;
-    return [0, Math.round(s * 255), 255];
-  } else if (t < 0.60) {
-    // cyan → green → yellow
-    const s = (t - 0.40) / 0.20;
-    return [Math.round(s * 255), 255, Math.round(255 - s * 255)];
-  } else if (t < 0.80) {
-    // yellow → orange → red
-    const s = (t - 0.60) / 0.20;
-    return [255, Math.round(255 - s * 200), 0];
-  } else {
-    // red (hot)
-    return [255, 0, 0];
-  }
-}
-
 // ── State ──────────────────────────────────────────────────
 let micOn        = false;
-let gainVal      = 5.0;  // fixed high gain
+let gainVal      = 5.0;
 let sensVal      = 0.55;
 let selH         = new Array(NUM_H).fill(false);
 let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
@@ -414,7 +387,7 @@ let currentFreq  = null;
 
 const FREQ_LO = 10;
 const FREQ_HI = 10000;
-let spectroGain = 50; // adjustable via slider
+let spectroGain = 50;
 
 function dbToRGB(db) {
   const boosted = db + spectroGain;
@@ -480,22 +453,7 @@ function yToFreq(y, H) {
   }
 }
 
-function toggleScale() {
-  logScale = !logScale;
-  const label  = document.getElementById("scale-label");
-  const toggle = document.getElementById("scale-toggle");
-  const knob   = document.getElementById("scale-knob");
-  label.textContent    = logScale ? "LOG" : "LIN";
-  toggle.style.background = logScale ? "#2255aa" : "#446622";
-  knob.style.left      = logScale ? "2px" : "18px";
-  // Clear canvas on scale change
-  if (offCtx && offCanvas) {
-    offCtx.fillStyle = "#000";
-    offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
-  }
-  lastAxisUpdate = 0;
-  updateFreqAxisLabels();
-}
+// scale toggle handled by addEventListener below
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 
