@@ -246,6 +246,20 @@ transition: border-color 0.2s;
 .beat-card .bc-unit { font-size: 9px; color: #555; }
 
 /* controls removed */
+/* ── Controls ── */
+#controls {
+background: #1a1a1a;
+border-top: 1px solid #333;
+padding: 6px 12px;
+display: flex;
+flex-direction: column;
+gap: 6px;
+flex-shrink: 0;
+}
+.ctrl-row { display: flex; align-items: center; gap: 8px; }
+.ctrl-label { font-size: 11px; color: #666; min-width: 40px; letter-spacing: 0.5px; }
+.ctrl-row input[type=range] { flex: 1; accent-color: #3355cc; height: 22px; }
+.ctrl-val { font-size: 11px; color: #888; min-width: 44px; text-align: right; }
 </style>
 
 </head>
@@ -372,27 +386,40 @@ let currentFreq  = null;
 
 const FREQ_LO = 27.5;
 const FREQ_HI = 4200;
-const SPECTRO_GAIN_DB = 50; // aggressive gain boost
+let spectroGain = 50; // adjustable via slider
 
 function dbToRGB(db) {
-  const boosted = db + SPECTRO_GAIN_DB;
-  // Map -60dB→0 (black) to 0dB→1 (red)
-  const t = Math.max(0, Math.min(1, (boosted + 60) / 60));
-  if (t < 0.20) {
-    const s = t / 0.20;
-    return [0, 0, Math.round(s * 255)];
-  } else if (t < 0.40) {
-    const s = (t - 0.20) / 0.20;
-    return [0, Math.round(s * 255), 255];
+  const boosted = db + spectroGain;
+  // Map -96→0 to 0→1
+  const t = Math.max(0, Math.min(1, (boosted + 96) / 96));
+
+  // Reference app colours:
+  // 0.00-0.30: dark blue → blue → cyan (noise floor)
+  // 0.30-0.50: cyan → green
+  // 0.50-0.70: green → yellow
+  // 0.70-0.85: yellow → orange
+  // 0.85-1.00: orange → red → dark red
+  if (t < 0.15) {
+    const s = t / 0.15;
+    return [0, Math.round(s * 100), Math.round(100 + s * 100)];
+  } else if (t < 0.30) {
+    const s = (t - 0.15) / 0.15;
+    return [0, Math.round(100 + s * 155), 200];
+  } else if (t < 0.45) {
+    const s = (t - 0.30) / 0.15;
+    return [0, 255, Math.round(200 - s * 200)];
   } else if (t < 0.60) {
-    const s = (t - 0.40) / 0.20;
-    return [0, 255, Math.round(255 - s * 255)];
-  } else if (t < 0.80) {
-    const s = (t - 0.60) / 0.20;
+    const s = (t - 0.45) / 0.15;
     return [Math.round(s * 255), 255, 0];
+  } else if (t < 0.75) {
+    const s = (t - 0.60) / 0.15;
+    return [255, Math.round(255 - s * 130), 0];
+  } else if (t < 0.90) {
+    const s = (t - 0.75) / 0.15;
+    return [255, Math.round(125 - s * 125), 0];
   } else {
-    const s = (t - 0.80) / 0.20;
-    return [255, Math.round(255 - s * 255), 0];
+    const s = (t - 0.90) / 0.10;
+    return [Math.round(255 - s * 100), 0, 0];
   }
 }
 
@@ -750,6 +777,10 @@ function resetState() {
 }
 
 // sliders removed
+document.getElementById("sl-gain").addEventListener("input", function() {
+  spectroGain = parseInt(this.value);
+  document.getElementById("vl-gain").textContent = spectroGain + " dB";
+});
 </script>
 
 </body>
