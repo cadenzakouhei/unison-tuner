@@ -161,6 +161,7 @@ position: relative;
 flex: 1;
 position: relative;
 overflow: hidden;
+touch-action: none;
 }
 #spectro-canvas {
 position: absolute;
@@ -516,13 +517,13 @@ const spectroWrapEl = document.getElementById("spectro-canvas-wrap");
 
 // ── 1-finger scroll ────────────────────────────────────────
 spectroWrapEl.addEventListener("touchstart", e => {
+  e.preventDefault(); // must prevent default for ALL touches on this element
   if (e.touches.length === 1) {
     scrollStartY   = e.touches[0].clientY;
     scrollStartLo  = viewLo;
     scrollStartHi  = viewHi;
   } else if (e.touches.length === 2) {
-    e.preventDefault();
-    scrollStartY   = null; // cancel scroll
+    scrollStartY   = null;
     pinchStartDist = getTouchDist(e);
     pinchStartLo   = viewLo;
     pinchStartHi   = viewHi;
@@ -538,8 +539,8 @@ spectroWrapEl.addEventListener("touchmove", e => {
     const rect     = spectroCanvas.getBoundingClientRect();
     const dragPx   = e.touches[0].clientY - scrollStartY;
     const range    = scrollStartHi - scrollStartLo;
-    // drag down → show lower freq, drag up → show higher freq
-    const freqShift = -(dragPx / rect.height) * range;
+    // drag up → show lower freq, drag down → show higher freq
+    const freqShift = (dragPx / rect.height) * range;
     let lo = scrollStartLo + freqShift;
     let hi = scrollStartHi + freqShift;
     if (lo < FREQ_LO) { lo = FREQ_LO; hi = lo + range; }
