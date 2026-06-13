@@ -499,8 +499,9 @@ let pinchStartDist  = null;
 let pinchStartLo    = null;
 let pinchStartHi    = null;
 let pinchCenterFreq = null;
-let pinchStartMidY  = null;
-let isPinching      = false;
+let scrollStartY    = null;
+let scrollStartLo   = null;
+let scrollStartHi   = null;
 
 function getTouchDist(e) {
   const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -513,49 +514,56 @@ function getTouchMidY(e) {
 
 const spectroWrapEl = document.getElementById("spectro-canvas-wrap");
 
+// ── 1-finger scroll ────────────────────────────────────────
 spectroWrapEl.addEventListener("touchstart", e => {
-  if (e.touches.length === 2) {
+  if (e.touches.length === 1) {
+    scrollStartY   = e.touches[0].clientY;
+    scrollStartLo  = viewLo;
+    scrollStartHi  = viewHi;
+  } else if (e.touches.length === 2) {
     e.preventDefault();
-    isPinching      = true;
-    pinchStartDist  = getTouchDist(e);
-    pinchStartLo    = viewLo;
-    pinchStartHi    = viewHi;
-    pinchStartMidY  = getTouchMidY(e);
+    scrollStartY   = null; // cancel scroll
+    pinchStartDist = getTouchDist(e);
+    pinchStartLo   = viewLo;
+    pinchStartHi   = viewHi;
     const rect = spectroCanvas.getBoundingClientRect();
-    const midY = pinchStartMidY - rect.top;
+    const midY = getTouchMidY(e) - rect.top;
     pinchCenterFreq = yToFreq(midY, rect.height);
   }
 }, { passive: false });
 
 spectroWrapEl.addEventListener("touchmove", e => {
-  if (e.touches.length === 2 && pinchStartDist !== null) {
+  if (e.touches.length === 1 && scrollStartY !== null) {
     e.preventDefault();
-    const rect   = spectroCanvas.getBoundingClientRect();
-    const dist   = getTouchDist(e);
-    const curMidY= getTouchMidY(e);
-    const range  = pinchStartHi - pinchStartLo;
-
-    // ── Pinch zoom ──
-    const scale    = pinchStartDist / dist;
-    const newRange = Math.max(50, Math.min(FREQ_HI - FREQ_LO, range * scale));
-    let lo = pinchCenterFreq - newRange * ((pinchCenterFreq - pinchStartLo) / range);
-    let hi = lo + newRange;
-
-    // ── 2-finger scroll (vertical drag) ──
-    const dragPx   = pinchStartMidY - curMidY; // px moved upward
-    const freqShift= (dragPx / rect.height) * newRange;
-    lo += freqShift;
-    hi += freqShift;
-
-    // Clamp
-    if (lo < FREQ_LO) { lo = FREQ_LO; hi = lo + newRange; }
-    if (hi > FREQ_HI) { hi = FREQ_HI; lo = hi - newRange; }
-    if (lo < FREQ_LO)   lo = FREQ_LO;
-
+    const rect     = spectroCanvas.getBoundingClientRect();
+    const dragPx   = e.touches[0].clientY - scrollStartY;
+    const range    = scrollStartHi - scrollStartLo;
+    // drag down → show lower freq, drag up → show higher freq
+    const freqShift = -(dragPx / rect.height) * range;
+    let lo = scrollStartLo + freqShift;
+    let hi = scrollStartHi + freqShift;
+    if (lo < FREQ_LO) { lo = FREQ_LO; hi = lo + range; }
+    if (hi > FREQ_HI) { hi = FREQ_HI; lo = hi - range; }
     viewLo = lo;
     viewHi = hi;
-
-    // Clear offscreen on range change
+    if (offCtx && offCanvas) {
+      offCtx.fillStyle = "#000";
+      offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+    }
+  } else if (e.touches.length === 2 && pinchStartDist !== null) {
+    e.preventDefault();
+    const rect    = spectroCanvas.getBoundingClientRect();
+    const curDist = getTouchDist(e);
+    const scale   = pinchStartDist / curDist;
+    const origRange = pinchStartHi - pinchStartLo;
+    const newRange  = Math.max(50, Math.min(FREQ_HI - FREQ_LO, origRange * scale));
+    let lo = pinchCenterFreq - newRange * ((pinchCenterFreq - pinchStartLo) / origRange);
+    let hi = lo + newRange;
+    if (lo < FREQ_LO) { lo = FREQ_LO; hi = lo + newRange; }
+    if (hi > FREQ_HI) { hi = FREQ_HI; lo = hi - newRange; }
+    if (lo < FREQ_LO) lo = FREQ_LO;
+    viewLo = lo;
+    viewHi = hi;
     if (offCtx && offCanvas) {
       offCtx.fillStyle = "#000";
       offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
@@ -564,9 +572,15 @@ spectroWrapEl.addEventListener("touchmove", e => {
 }, { passive: false });
 
 spectroWrapEl.addEventListener("touchend", e => {
-  if (e.touches.length < 2) {
+  if (e.touches.length === 0) {
+    scrollStartY   = null;
     pinchStartDist = null;
-    isPinching = false;
+  } else if (e.touches.length === 1) {
+    pinchStartDist = null;
+    // restart scroll from current position
+    scrollStartY  = e.touches[0].clientY;
+    scrollStartLo = viewLo;
+    scrollStartHi = viewHi;
   }
 });
 
@@ -587,7 +601,7 @@ async function startMic() {
     gainNode.gain.value = gainVal;
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.85;
+    analyser.smoothingTimeConstant = 0.92;
     fftData  = new Float32Array(analyser.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
@@ -865,6 +879,7 @@ function resetState() {
   statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]);
   beatNullCount=new Array(NUM_H).fill(0);
+  viewLo=10; viewHi=10000;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
 
