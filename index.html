@@ -480,15 +480,32 @@ document.addEventListener("visibilitychange", ()=>{
 // ── Pitch & beat detection ─────────────────────────────────
 function detectPitch(data, sr) {
   const binSize = sr / FFT_SIZE;
+  // Find strongest peak
   let maxVal=-Infinity, maxBin=0;
   const lo=Math.floor(27.5/binSize), hi=Math.min(Math.floor(4200/binSize), data.length-1);
   for (let i=lo; i<=hi; i++) if (data[i]>maxVal) { maxVal=data[i]; maxBin=i; }
-  if (maxVal < -60) return null; // require strong signal
+  if (maxVal < -65) return null;
+
+  // Parabolic interpolation
   const prev=maxBin>0?data[maxBin-1]:data[maxBin];
   const next=maxBin<data.length-1?data[maxBin+1]:data[maxBin];
   const denom=prev-2*maxVal+next;
   const delta=Math.abs(denom)>0.001?0.5*(prev-next)/denom:0;
-  return (maxBin+delta)*binSize;
+  const peakFreq = (maxBin+delta)*binSize;
+
+  // Check if a subharmonic (fundamental) exists that's stronger
+  // Try dividing by 2,3,4 to find the true fundamental
+  for (const div of [2, 3, 4]) {
+    const subFreq = peakFreq / div;
+    if (subFreq < 27.5) continue;
+    const subBin = Math.round(subFreq / binSize);
+    if (subBin < lo) continue;
+    const subVal = data[Math.min(subBin, data.length-1)];
+    if (subVal > maxVal - 12) { // within 12dB → likely the true fundamental
+      return subFreq;
+    }
+  }
+  return peakFreq;
 }
 
 function detectBeat(data, sr, hFreq) {
