@@ -315,7 +315,15 @@ transition: border-color 0.2s;
 <div class="section-label"><span>Beat Frequency — Selected Harmonics</span></div>
 <div id="beat-bar"><span id="beat-bar-empty">Select a harmonic above to show beat frequency</span></div>
 
-<!-- Controls removed -->
+<!-- Gain control -->
+
+<div id="controls">
+  <div class="ctrl-row">
+    <span class="ctrl-label">GAIN</span>
+    <input type="range" id="sl-gain" min="10" max="90" step="1" value="50">
+    <span class="ctrl-val" id="vl-gain">50 dB</span>
+  </div>
+</div>
 
 <script>
 const NOTE_NAMES  = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
@@ -362,46 +370,29 @@ let beatNullCount= new Array(NUM_H).fill(0);
 let statusVals   = new Array(NUM_H).fill(0);
 let currentFreq  = null;
 
-// Fixed frequency range
 const FREQ_LO = 27.5;
 const FREQ_HI = 4200;
-const SPECTRO_GAIN_DB = 20.3; // match reference app gain
+const SPECTRO_GAIN_DB = 50; // aggressive gain boost
 
-// Colour map matching reference app exactly
-// Input range after gain: maps -96+20=-76dB baseline
 function dbToRGB(db) {
-  // Apply gain boost
   const boosted = db + SPECTRO_GAIN_DB;
-  // Map -96 to 0 dB → colour
-  const t = Math.max(0, Math.min(1, (boosted + 96) / 96));
-  if (t < 0.15) {
-    // black → dark blue
-    const s = t / 0.15;
-    return [0, 0, Math.round(s * 160)];
-  } else if (t < 0.30) {
-    // dark blue → blue
-    const s = (t - 0.15) / 0.15;
-    return [0, Math.round(s * 50), Math.round(160 + s * 95)];
-  } else if (t < 0.45) {
-    // blue → cyan
-    const s = (t - 0.30) / 0.15;
-    return [0, Math.round(50 + s * 205), 255];
+  // Map -60dB→0 (black) to 0dB→1 (red)
+  const t = Math.max(0, Math.min(1, (boosted + 60) / 60));
+  if (t < 0.20) {
+    const s = t / 0.20;
+    return [0, 0, Math.round(s * 255)];
+  } else if (t < 0.40) {
+    const s = (t - 0.20) / 0.20;
+    return [0, Math.round(s * 255), 255];
   } else if (t < 0.60) {
-    // cyan → green
-    const s = (t - 0.45) / 0.15;
+    const s = (t - 0.40) / 0.20;
     return [0, 255, Math.round(255 - s * 255)];
-  } else if (t < 0.75) {
-    // green → yellow
-    const s = (t - 0.60) / 0.15;
+  } else if (t < 0.80) {
+    const s = (t - 0.60) / 0.20;
     return [Math.round(s * 255), 255, 0];
-  } else if (t < 0.90) {
-    // yellow → red
-    const s = (t - 0.75) / 0.15;
-    return [255, Math.round(255 - s * 255), 0];
   } else {
-    // red → white-red (hottest)
-    const s = (t - 0.90) / 0.10;
-    return [255, Math.round(s * 100), Math.round(s * 100)];
+    const s = (t - 0.80) / 0.20;
+    return [255, Math.round(255 - s * 255), 0];
   }
 }
 
