@@ -325,38 +325,29 @@ const BEAT_SMOOTH = 20;
 const BEAT_NULL_THRESH = 30;
 const SCROLL_SPD  = 1;
 
-// Colour map: green at -70dB, red at 0dB, blue below -70dB
+// Colour map: sensitive - green at -85dB, red at -40dB
 function dbToRGB(db) {
   if (db < -96) return [0, 0, 0];
-  if (db < -70) {
-    // -96 to -70: black → blue → cyan
-    const t = (db + 96) / 26;
-    if (t < 0.5) {
-      const s = t / 0.5;
-      return [0, 0, Math.round(s * 220)];
-    } else {
-      const s = (t - 0.5) / 0.5;
-      return [0, Math.round(s * 180), 220];
-    }
+  if (db < -85) {
+    const t = (db + 96) / 11;
+    return [0, 0, Math.round(t * 180)];
+  } else if (db < -70) {
+    const t = (db + 85) / 15;
+    return [0, Math.round(t * 200), Math.round(180 - t * 80)];
+  } else if (db < -55) {
+    const t = (db + 70) / 15;
+    return [Math.round(t * 255), 200, 0];
+  } else if (db < -40) {
+    const t = (db + 55) / 15;
+    return [255, Math.round(200 - t * 100), 0];
   } else {
-    // -70 to 0: cyan → green → yellow → red
-    const t = (db + 70) / 70;
-    if (t < 0.33) {
-      const s = t / 0.33;
-      return [0, Math.round(180 + s * 75), Math.round(220 - s * 220)];
-    } else if (t < 0.66) {
-      const s = (t - 0.33) / 0.33;
-      return [Math.round(s * 255), 255, 0];
-    } else {
-      const s = (t - 0.66) / 0.34;
-      return [255, Math.round(255 - s * 255), 0];
-    }
+    return [255, 0, 0];
   }
 }
 
 // ── State ──────────────────────────────────────────────────
 let micOn        = false;
-let gainVal      = 2.0;
+let gainVal      = 5.0;  // fixed high gain
 let sensVal      = 0.55;
 let selH         = new Array(NUM_H).fill(false);
 let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
@@ -451,7 +442,7 @@ async function startMic() {
     gainNode.gain.value = gainVal;
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.80;
+    analyser.smoothingTimeConstant = 0.85;
     fftData  = new Float32Array(analyser.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
@@ -480,35 +471,37 @@ document.addEventListener("visibilitychange", ()=>{
   if (!document.hidden && audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
 });
 
-// ── Pitch & beat detection ─────────────────────────────────
+// ── Pitch detection using HPS (Harmonic Product Spectrum) ──
 function detectPitch(data, sr) {
   const binSize = sr / FFT_SIZE;
-  // Find strongest peak
-  let maxVal=-Infinity, maxBin=0;
-  const lo=Math.floor(27.5/binSize), hi=Math.min(Math.floor(4200/binSize), data.length-1);
-  for (let i=lo; i<=hi; i++) if (data[i]>maxVal) { maxVal=data[i]; maxBin=i; }
-  if (maxVal < -65) return null;
+  const lo = Math.floor(27.5 / binSize);
+  const hi = Math.min(Math.floor(1500 / binSize), data.length - 1);
+
+  // Convert dB to linear power
+  const linear = new Float32Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    linear[i] = Math.pow(10, data[i] / 20);
+  }
+
+  // HPS: multiply spectrum by downsampled versions (x2, x3, x4)
+  let maxVal = -Infinity, maxBin = 0;
+  for (let i = lo; i <= hi; i++) {
+    const v = linear[i]
+      * (linear[Math.min(i*2, data.length-1)])
+      * (linear[Math.min(i*3, data.length-1)])
+      * (linear[Math.min(i*4, data.length-1)]);
+    if (v > maxVal) { maxVal = v; maxBin = i; }
+  }
+
+  // Require minimum signal
+  if (data[maxBin] < -70) return null;
 
   // Parabolic interpolation
-  const prev=maxBin>0?data[maxBin-1]:data[maxBin];
-  const next=maxBin<data.length-1?data[maxBin+1]:data[maxBin];
-  const denom=prev-2*maxVal+next;
-  const delta=Math.abs(denom)>0.001?0.5*(prev-next)/denom:0;
-  const peakFreq = (maxBin+delta)*binSize;
-
-  // Check if a subharmonic (fundamental) exists that's stronger
-  // Try dividing by 2,3,4 to find the true fundamental
-  for (const div of [2, 3, 4]) {
-    const subFreq = peakFreq / div;
-    if (subFreq < 27.5) continue;
-    const subBin = Math.round(subFreq / binSize);
-    if (subBin < lo) continue;
-    const subVal = data[Math.min(subBin, data.length-1)];
-    if (subVal > maxVal - 12) { // within 12dB → likely the true fundamental
-      return subFreq;
-    }
-  }
-  return peakFreq;
+  const prev  = maxBin > 0 ? data[maxBin-1] : data[maxBin];
+  const next  = maxBin < data.length-1 ? data[maxBin+1] : data[maxBin];
+  const denom = prev - 2*data[maxBin] + next;
+  const delta = Math.abs(denom) > 0.001 ? 0.5*(prev-next)/denom : 0;
+  return (maxBin + delta) * binSize;
 }
 
 function detectBeat(data, sr, hFreq) {
