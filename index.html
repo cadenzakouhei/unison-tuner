@@ -177,10 +177,15 @@ pointer-events: none;
 .freq-label {
 position: absolute;
 left: 4px;
-font-size: 9px;
-color: rgba(255,255,255,0.5);
+font-size: 11px;
+font-weight: 600;
+color: #fff;
+background: rgba(0,0,0,0.55);
+padding: 0 3px;
+border-radius: 2px;
 transform: translateY(-50%);
 white-space: nowrap;
+z-index: 10;
 }
 
 /* dB scale */
@@ -709,7 +714,11 @@ function drawSpectroColumn(binSize) {
     const freq = yToFreq(py, H);
     const bin  = Math.round(freq / binSize);
     const db   = (bin >= 0 && bin < fftData.length) ? fftData[bin] : -120;
-    const [r,g,b] = dbToRGB(db);
+    // Sample neighbours for peak spreading (makes lines thicker/bolder)
+    const dbP1 = (bin+1 >= 0 && bin+1 < fftData.length) ? fftData[bin+1] : -120;
+    const dbM1 = (bin-1 >= 0 && bin-1 < fftData.length) ? fftData[bin-1] : -120;
+    const dbMax = Math.max(db, dbP1 * 0.85, dbM1 * 0.85);
+    const [r,g,b] = dbToRGB(dbMax);
     for (let px = 0; px < colW; px++) {
       const i = (py * colW + px) * 4;
       d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255;
