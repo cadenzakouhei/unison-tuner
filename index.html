@@ -165,9 +165,9 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 <div class="section-label">
   <span>FFT / Spectrogram (H1–H8)</span>
   <div style="display:flex;align-items:center;gap:6px;">
-    <span id="scale-label" style="font-size:10px;color:#666;">LOG</span>
-    <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#2255aa;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-      <div id="scale-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
+    <span id="scale-label" style="font-size:10px;color:#666;">LIN</span>
+    <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+      <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
     </div>
     <span id="sr-label" style="font-size:10px;color:#666;">44100 Hz</span>
   </div>
@@ -205,8 +205,8 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 <div id="controls">
   <div class="ctrl-row">
     <span class="ctrl-label">GAIN</span>
-    <input type="range" id="sl-gain" min="10" max="90" step="1" value="50">
-    <span class="ctrl-val" id="vl-gain">50 dB</span>
+    <input type="range" id="sl-gain" min="10" max="90" step="1" value="20">
+    <span class="ctrl-val" id="vl-gain">20 dB</span>
   </div>
   <div class="ctrl-row">
     <span class="ctrl-label">A4 REF</span>
@@ -218,7 +218,7 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 
 <script>
 const NOTE_NAMES     = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-const FFT_SIZE       = 16384;
+const FFT_SIZE       = 8192;
 const NUM_H          = 8;
 const BEAT_SMOOTH    = 20;
 const BEAT_NULL_THRESH = 30;
@@ -229,49 +229,51 @@ const FREQ_HI        = 10000;
 // ── Mutable state ──────────────────────────────────────────
 let micOn        = false;
 let gainVal      = 5.0;
-let spectroGain  = 50;
+let spectroGain  = 20;  // match reference app 20.3dB
 let refPitch     = 442.0;
-let logScale     = true;
+let logScale     = false; // default linear like reference app
 let selH         = new Array(NUM_H).fill(false);
 let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
 let beatNullCount= new Array(NUM_H).fill(0);
 let statusVals   = new Array(NUM_H).fill(0);
 let currentFreq  = null;
 let viewLo       = 10;
-let viewHi       = 10000;
+let viewHi       = 4200; // default range matches reference app
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 let offCanvas=null, offCtx=null;
 let lastAxisUpdate = 0;
+let blackmanWin = null;
 
-// ── Colour map ─────────────────────────────────────────────
+// ── Colour map (matches reference app exactly) ─────────────
+// Reference: background=cyan(-60dB), signal=yellow-red(-40~0dB)
 function dbToRGB(db) {
   const boosted = db + spectroGain;
   const t = Math.max(0, Math.min(1, (boosted + 96) / 96));
-  // 0.00-0.25: black → dark blue
-  // 0.25-0.45: dark blue → blue → cyan  (noise floor = cyan)
-  // 0.45-0.60: cyan → green
-  // 0.60-0.75: green → yellow
-  // 0.75-0.88: yellow → orange
-  // 0.88-1.00: orange → red
-  if (t < 0.25) {
-    const s = t / 0.25;
-    return [0, Math.round(s*30), Math.round(s*180)];
-  } else if (t < 0.45) {
-    const s = (t-0.25)/0.20;
-    return [0, Math.round(30+s*225), Math.round(180+s*75)];
-  } else if (t < 0.60) {
-    const s = (t-0.45)/0.15;
-    return [0, 255, Math.round(255-s*255)];
-  } else if (t < 0.75) {
-    const s = (t-0.60)/0.15;
-    return [Math.round(s*255), 255, 0];
-  } else if (t < 0.88) {
-    const s = (t-0.75)/0.13;
-    return [255, Math.round(255-s*165), 0];
+  // 0.00-0.20: black → dark blue
+  // 0.20-0.40: dark blue → blue → cyan  ← noise floor
+  // 0.40-0.55: cyan → yellow-green
+  // 0.55-0.70: yellow-green → yellow
+  // 0.70-0.85: yellow → orange → red
+  // 0.85-1.00: red → dark red
+  if (t < 0.20) {
+    const s = t/0.20;
+    return [0, Math.round(s*80), Math.round(s*160)];
+  } else if (t < 0.40) {
+    const s = (t-0.20)/0.20;
+    return [0, Math.round(80+s*175), Math.round(160+s*95)];
+  } else if (t < 0.55) {
+    const s = (t-0.40)/0.15;
+    return [Math.round(s*100), 255, Math.round(255-s*255)];
+  } else if (t < 0.70) {
+    const s = (t-0.55)/0.15;
+    return [Math.round(100+s*155), 255, 0];
+  } else if (t < 0.85) {
+    const s = (t-0.70)/0.15;
+    return [255, Math.round(255-s*200), 0];
   } else {
-    const s = (t-0.88)/0.12;
-    return [255, Math.round(90-s*90), 0];
+    const s = (t-0.85)/0.15;
+    return [255, Math.round(55-s*55), 0];
   }
 }
 
@@ -424,10 +426,16 @@ async function startMic() {
     gainNode.gain.value = gainVal;
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.85;
+    analyser.smoothingTimeConstant = 0.65;
     fftData  = new Float32Array(analyser.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
+    // Precompute Blackman window
+    const N = analyser.fftSize;
+    blackmanWin = new Float32Array(N);
+    for (let i=0; i<N; i++) {
+      blackmanWin[i] = 0.42 - 0.5*Math.cos(2*Math.PI*i/(N-1)) + 0.08*Math.cos(4*Math.PI*i/(N-1));
+    }
     document.getElementById("sr-label").textContent = audioCtx.sampleRate+" Hz";
     micOn = true;
     const btn = document.getElementById("mic-btn");
@@ -651,7 +659,7 @@ function updateLevel(db) {
 function resetState() {
   currentFreq=null; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
-  viewLo=10; viewHi=10000;
+  viewLo=10; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
 
