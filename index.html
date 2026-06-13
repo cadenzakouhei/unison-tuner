@@ -325,28 +325,31 @@ const BEAT_SMOOTH = 20;
 const BEAT_NULL_THRESH = 30;
 const SCROLL_SPD  = 1;
 
-// Colour map: blue below -50dB, green at -50dB, red at 0dB
+// Colour map: green at -70dB, red at 0dB, blue below -70dB
 function dbToRGB(db) {
-  if (db < -98) return [0, 0, 0];
-  if (db < -50) {
-    // -98 to -50: black → blue → cyan
-    const t = (db + 98) / 48;
+  if (db < -96) return [0, 0, 0];
+  if (db < -70) {
+    // -96 to -70: black → blue → cyan
+    const t = (db + 96) / 26;
     if (t < 0.5) {
       const s = t / 0.5;
-      return [0, 0, Math.round(s * 200)];
+      return [0, 0, Math.round(s * 220)];
     } else {
       const s = (t - 0.5) / 0.5;
-      return [0, Math.round(s * 200), 200];
+      return [0, Math.round(s * 180), 220];
     }
   } else {
-    // -50 to 0: green → yellow → red
-    const t = (db + 50) / 50;
-    if (t < 0.5) {
-      const s = t / 0.5;
-      return [Math.round(s * 255), 200, 0];
+    // -70 to 0: cyan → green → yellow → red
+    const t = (db + 70) / 70;
+    if (t < 0.33) {
+      const s = t / 0.33;
+      return [0, Math.round(180 + s * 75), Math.round(220 - s * 220)];
+    } else if (t < 0.66) {
+      const s = (t - 0.33) / 0.33;
+      return [Math.round(s * 255), 255, 0];
     } else {
-      const s = (t - 0.5) / 0.5;
-      return [255, Math.round(200 - s * 200), 0];
+      const s = (t - 0.66) / 0.34;
+      return [255, Math.round(255 - s * 255), 0];
     }
   }
 }
