@@ -296,7 +296,20 @@ flex-shrink: 0;
 
 <div class="section-label">
   <span>FFT / Spectrogram (H1–H8)</span>
-  <span id="sr-label">44100 Hz</span>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <span style="font-size:10px;color:#666;" id="scale-label">LOG</span>
+    <div id="scale-toggle" onclick="toggleScale()" style="
+      width:36px;height:20px;border-radius:10px;
+      background:#2255aa;position:relative;cursor:pointer;
+      transition:background 0.2s;flex-shrink:0;">
+      <div id="scale-knob" style="
+        position:absolute;top:2px;left:2px;
+        width:16px;height:16px;border-radius:50%;
+        background:#fff;transition:left 0.2s;">
+      </div>
+    </div>
+    <span id="sr-label" style="font-size:11px;color:#666;">44100 Hz</span>
+  </div>
 </div>
 
 <!-- Harmonic select buttons -->
@@ -342,6 +355,15 @@ flex-shrink: 0;
     <span class="ctrl-label">GAIN</span>
     <input type="range" id="sl-gain" min="10" max="90" step="1" value="50">
     <span class="ctrl-val" id="vl-gain">50 dB</span>
+  </div>
+  <div class="ctrl-row">
+    <span class="ctrl-label">A4 REF</span>
+    <input type="range" id="sl-ref" min="435" max="450" step="0.1" value="442">
+    <span class="ctrl-val" id="vl-ref">442.0 Hz</span>
+    <button id="ref-reset" onclick="resetRef()" style="
+      background:#1a1a2a;border:1px solid #334;border-radius:5px;
+      color:#88aaff;font-size:11px;padding:4px 8px;cursor:pointer;
+      -webkit-appearance:none;flex-shrink:0;">442</button>
   </div>
 </div>
 
@@ -433,11 +455,46 @@ function dbToRGB(db) {
 let viewLo = 10;
 let viewHi = 10000;
 
+// Dynamic view range (changed by pinch zoom / 1-finger scroll)
+let viewLo   = 10;
+let viewHi   = 10000;
+let logScale = true; // default: log scale
+
 function freqToY(freq, H) {
-  return H * (1 - (Math.max(viewLo, Math.min(viewHi, freq)) - viewLo) / (viewHi - viewLo));
+  if (logScale) {
+    const logLo = Math.log2(Math.max(1, viewLo));
+    const logHi = Math.log2(viewHi);
+    const logF  = Math.log2(Math.max(1, Math.min(viewHi, Math.max(viewLo, freq))));
+    return H * (1 - (logF - logLo) / (logHi - logLo));
+  } else {
+    return H * (1 - (Math.max(viewLo, Math.min(viewHi, freq)) - viewLo) / (viewHi - viewLo));
+  }
 }
 function yToFreq(y, H) {
-  return viewLo + (1 - y / H) * (viewHi - viewLo);
+  if (logScale) {
+    const logLo = Math.log2(Math.max(1, viewLo));
+    const logHi = Math.log2(viewHi);
+    return Math.pow(2, logLo + (1 - y / H) * (logHi - logLo));
+  } else {
+    return viewLo + (1 - y / H) * (viewHi - viewLo);
+  }
+}
+
+function toggleScale() {
+  logScale = !logScale;
+  const label  = document.getElementById("scale-label");
+  const toggle = document.getElementById("scale-toggle");
+  const knob   = document.getElementById("scale-knob");
+  label.textContent    = logScale ? "LOG" : "LIN";
+  toggle.style.background = logScale ? "#2255aa" : "#446622";
+  knob.style.left      = logScale ? "2px" : "18px";
+  // Clear canvas on scale change
+  if (offCtx && offCanvas) {
+    offCtx.fillStyle = "#000";
+    offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+  }
+  lastAxisUpdate = 0;
+  updateFreqAxisLabels();
 }
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
@@ -688,10 +745,12 @@ function detectBeat(data, sr, hFreq) {
   return Math.abs(peaks[0].f-peaks[1].f);
 }
 
+let refPitch = 442.0; // reference A4 pitch
+
 function freqToNote(freq) {
   if (!freq||freq<27.5||freq>4978) return null;
-  const midi=69+12*Math.log2(freq/440);
-  const r=Math.round(midi);
+  const midi = 69 + 12 * Math.log2(freq / refPitch);
+  const r    = Math.round(midi);
   if (r<33||r>108) return null;
   return { name: NOTE_NAMES[r%12]+(Math.floor(r/12)-1), cents:(midi-r)*100 };
 }
@@ -897,6 +956,16 @@ document.getElementById("sl-gain").addEventListener("input", function() {
   spectroGain = parseInt(this.value);
   document.getElementById("vl-gain").textContent = spectroGain + " dB";
 });
+document.getElementById("sl-ref").addEventListener("input", function() {
+  refPitch = parseFloat(this.value);
+  document.getElementById("vl-ref").textContent = refPitch.toFixed(1) + " Hz";
+});
+function resetRef() {
+  refPitch = 442.0;
+  const sl = document.getElementById("sl-ref");
+  sl.value = 442.0;
+  document.getElementById("vl-ref").textContent = "442.0 Hz";
+}
 </script>
 
 </body>
