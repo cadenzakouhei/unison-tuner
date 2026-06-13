@@ -475,9 +475,11 @@ for (let h = 0; h < NUM_H; h++) {
 
 // ── Init canvas ────────────────────────────────────────────
 function initCanvas() {
-  const dpr = window.devicePixelRatio || 1;
-  const w   = spectroCanvas.parentElement.clientWidth  || 320;
-  const h   = spectroCanvas.parentElement.clientHeight || 300;
+  const dpr  = window.devicePixelRatio || 1;
+  const wrap = spectroCanvas.parentElement;
+  const w    = wrap.offsetWidth  || 320;
+  const h    = wrap.offsetHeight || 300;
+
   spectroCanvas.width  = w * dpr;
   spectroCanvas.height = h * dpr;
   spectroCanvas.style.width  = w + "px";
@@ -490,9 +492,12 @@ function initCanvas() {
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
 
+  lastAxisUpdate = 0;
   updateFreqAxisLabels();
 }
-setTimeout(initCanvas, 150);
+
+// Wait for full layout before init
+requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
 window.addEventListener("resize", initCanvas);
 
 // ── Pinch zoom on spectrogram ──────────────────────────────
@@ -786,35 +791,38 @@ function drawSpectroColumn(binSize) {
 let lastAxisUpdate = 0;
 function updateFreqAxisLabels() {
   const now = Date.now();
-  if (now - lastAxisUpdate < 500) return;
+  if (now - lastAxisUpdate < 300) return;
   lastAxisUpdate = now;
 
   freqAxisEl.innerHTML = "";
-  const H = spectroCanvas.clientHeight || 300;
+  const H = spectroCanvas.clientHeight || spectroCanvas.parentElement.offsetHeight || 300;
+  if (H < 10) return;
 
   // Grid labels
   const gridFreqs = [100, 200, 500, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000];
   gridFreqs.forEach(f => {
-    if (f < viewLo || f > viewHi) return;
+    if (f <= viewLo || f >= viewHi) return;
     const y   = freqToY(f, H);
+    if (y < 0 || y > H) return;
     const lbl = document.createElement("div");
     lbl.className = "freq-label";
     lbl.style.top   = y + "px";
-    lbl.style.color = "rgba(255,255,255,0.7)";
+    lbl.style.color = "rgba(255,255,255,0.75)";
     lbl.textContent = f >= 1000 ? (f/1000)+"kHz" : f+"Hz";
     freqAxisEl.appendChild(lbl);
   });
 
-  // Harmonic lines
+  // Harmonic labels
   if (currentFreq) {
     for (let h=0; h<NUM_H; h++) {
       const hf = currentFreq * (h+1);
-      if (hf > FREQ_HI) continue;
+      if (hf <= viewLo || hf >= viewHi) continue;
       const y   = freqToY(hf, H);
+      if (y < 0 || y > H) continue;
       const lbl = document.createElement("div");
       lbl.className = "freq-label";
       lbl.style.top   = y + "px";
-      lbl.style.color = selH[h] ? "rgba(200,255,0,0.9)" : "rgba(255,220,100,0.5)";
+      lbl.style.color = selH[h] ? "rgba(200,255,0,0.95)" : "rgba(255,220,100,0.6)";
       lbl.textContent = `H${h+1} ${hf.toFixed(0)}Hz`;
       freqAxisEl.appendChild(lbl);
     }
