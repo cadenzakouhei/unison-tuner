@@ -298,7 +298,7 @@ flex-shrink: 0;
   <span>FFT / Spectrogram (H1–H8)</span>
   <div style="display:flex;align-items:center;gap:6px;">
     <span style="font-size:10px;color:#666;" id="scale-label">LOG</span>
-    <div id="scale-toggle" onclick="toggleScale()" style="
+    <div id="scale-toggle" style="
       width:36px;height:20px;border-radius:10px;
       background:#2255aa;position:relative;cursor:pointer;
       transition:background 0.2s;flex-shrink:0;">
@@ -360,7 +360,7 @@ flex-shrink: 0;
     <span class="ctrl-label">A4 REF</span>
     <input type="range" id="sl-ref" min="435" max="450" step="0.1" value="442">
     <span class="ctrl-val" id="vl-ref">442.0 Hz</span>
-    <button id="ref-reset" onclick="resetRef()" style="
+    <button id="ref-reset" style="
       background:#1a1a2a;border:1px solid #334;border-radius:5px;
       color:#88aaff;font-size:11px;padding:4px 8px;cursor:pointer;
       -webkit-appearance:none;flex-shrink:0;">442</button>
@@ -960,12 +960,23 @@ document.getElementById("sl-ref").addEventListener("input", function() {
   refPitch = parseFloat(this.value);
   document.getElementById("vl-ref").textContent = refPitch.toFixed(1) + " Hz";
 });
-function resetRef() {
+document.getElementById("ref-reset").addEventListener("click", function() {
   refPitch = 442.0;
-  const sl = document.getElementById("sl-ref");
-  sl.value = 442.0;
+  document.getElementById("sl-ref").value = 442.0;
   document.getElementById("vl-ref").textContent = "442.0 Hz";
-}
+});
+document.getElementById("scale-toggle").addEventListener("click", function() {
+  logScale = !logScale;
+  document.getElementById("scale-label").textContent = logScale ? "LOG" : "LIN";
+  this.style.background = logScale ? "#2255aa" : "#446622";
+  document.getElementById("scale-knob").style.left = logScale ? "2px" : "18px";
+  if (offCtx && offCanvas) {
+    offCtx.fillStyle = "#000";
+    offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+  }
+  lastAxisUpdate = 0;
+  updateFreqAxisLabels();
+});
 </script>
 
 </body>
