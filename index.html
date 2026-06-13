@@ -423,12 +423,15 @@ function dbToRGB(db) {
   }
 }
 
-// Linear frequency → Y (no log scale, matching reference app)
+// Dynamic view range (changed by pinch zoom)
+let viewLo = 27.5;
+let viewHi = 4200;
+
 function freqToY(freq, H) {
-  return H * (1 - (Math.max(FREQ_LO, Math.min(FREQ_HI, freq)) - FREQ_LO) / (FREQ_HI - FREQ_LO));
+  return H * (1 - (Math.max(viewLo, Math.min(viewHi, freq)) - viewLo) / (viewHi - viewLo));
 }
 function yToFreq(y, H) {
-  return FREQ_LO + (1 - y / H) * (FREQ_HI - FREQ_LO);
+  return viewLo + (1 - y / H) * (viewHi - viewLo);
 }
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
@@ -485,6 +488,63 @@ function initCanvas() {
 }
 setTimeout(initCanvas, 150);
 window.addEventListener("resize", initCanvas);
+
+// ── Pinch zoom on spectrogram ──────────────────────────────
+let pinchStartDist = null;
+let pinchStartLo   = null;
+let pinchStartHi   = null;
+let pinchCenterFreq= null;
+
+function getTouchDist(e) {
+  const dx = e.touches[0].clientX - e.touches[1].clientX;
+  const dy = e.touches[0].clientY - e.touches[1].clientY;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+function getTouchMidY(e) {
+  return (e.touches[0].clientY + e.touches[1].clientY) / 2;
+}
+
+const spectroWrapEl = document.getElementById("spectro-canvas-wrap");
+spectroWrapEl.addEventListener("touchstart", e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    pinchStartDist  = getTouchDist(e);
+    pinchStartLo    = viewLo;
+    pinchStartHi    = viewHi;
+    const rect   = spectroCanvas.getBoundingClientRect();
+    const midY   = getTouchMidY(e) - rect.top;
+    pinchCenterFreq = yToFreq(midY, rect.height);
+  }
+}, { passive: false });
+
+spectroWrapEl.addEventListener("touchmove", e => {
+  if (e.touches.length === 2 && pinchStartDist !== null) {
+    e.preventDefault();
+    const dist  = getTouchDist(e);
+    const scale = pinchStartDist / dist; // pinch in → scale>1 → zoom in (narrow range)
+    const range = pinchStartHi - pinchStartLo;
+    const newRange = Math.max(50, Math.min(4200, range * scale));
+    // Keep center frequency fixed
+    let lo = pinchCenterFreq - newRange * ((pinchCenterFreq - pinchStartLo) / range);
+    let hi = lo + newRange;
+    // Clamp
+    if (lo < FREQ_LO) { lo = FREQ_LO; hi = lo + newRange; }
+    if (hi > FREQ_HI) { hi = FREQ_HI; lo = hi - newRange; }
+    if (lo < FREQ_LO) lo = FREQ_LO;
+    viewLo = lo;
+    viewHi = hi;
+    // Clear offscreen to redraw with new range
+    if (offCtx && offCanvas) {
+      offCtx.fillStyle = "#000";
+      offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+    }
+  }
+}, { passive: false });
+
+spectroWrapEl.addEventListener("touchend", e => {
+  if (e.touches.length < 2) pinchStartDist = null;
+});
+
 
 // ── Mic ────────────────────────────────────────────────────
 document.getElementById("mic-btn").addEventListener("click", ()=> micOn ? stopMic() : startMic());
