@@ -511,46 +511,59 @@ function detectBeat(data, sr, hFreq) {
   return null;
 }
 
-// Estimate beat rate from amplitude history by finding mean spacing
-// between local maxima (peak-picking on the smoothed envelope).
+// Estimate beat rate from amplitude history using autocorrelation
+// of the smoothed envelope. This is far more robust to FFT-frame
+// jitter / noise than naive peak-picking.
 function estimateAmpBeatRate(hist) {
-  if (hist.length < 20) return null;
+  if (hist.length < 30) return null;
 
-  // Heavier smoothing (moving average, ~150ms window) to remove
-  // frame-to-frame FFT jitter and keep only the slow beat envelope.
-  const sm = [];
-  const halfWin = 4; // ~9 samples wide at typical frame rate
-  for (let i=0;i<hist.length;i++) {
-    const s=Math.max(0,i-halfWin), e=Math.min(hist.length-1,i+halfWin);
-    let sum=0,cnt=0;
-    for (let j=s;j<=e;j++){ sum+=hist[j].db; cnt++; }
-    sm.push({t:hist[i].t, db:sum/cnt});
+  const t0 = hist[0].t;
+  const tN = hist[hist.length-1].t;
+  const totalMs = tN - t0;
+  if (totalMs < 2000) return null; // need at least 2s of data
+
+  // Resample onto a uniform time grid (50ms steps) for autocorrelation
+  const STEP_MS = 50;
+  const nSamples = Math.floor(totalMs / STEP_MS);
+  if (nSamples < 20) return null;
+  const grid = new Float32Array(nSamples);
+  let hi = 0;
+  for (let i=0;i<nSamples;i++) {
+    const tt = t0 + i*STEP_MS;
+    while (hi < hist.length-1 && hist[hi+1].t <= tt) hi++;
+    grid[i] = hist[Math.min(hi,hist.length-1)].db;
   }
 
-  // Peak-pick with a minimum refractory period so we don't count
-  // tiny noise wiggles as separate beats. Real piano beats are
-  // almost always slower than ~15 Hz, so refuse peaks closer than ~50ms.
-  const MIN_PEAK_GAP_MS = 60;
-  const peakTimes=[];
-  let lastPeakT = -Infinity;
-  for (let i=1;i<sm.length-1;i++) {
-    if (sm[i].db>sm[i-1].db && sm[i].db>=sm[i+1].db) {
-      if (sm[i].t - lastPeakT >= MIN_PEAK_GAP_MS) {
-        peakTimes.push(sm[i].t);
-        lastPeakT = sm[i].t;
-      }
-    }
+  // Remove DC (mean) component
+  let mean=0; for (let i=0;i<nSamples;i++) mean+=grid[i]; mean/=nSamples;
+  for (let i=0;i<nSamples;i++) grid[i]-=mean;
+
+  // Autocorrelation across plausible beat periods:
+  // 0.05 Hz (20s period) .. 15 Hz (67ms period)
+  const minLagMs = 1000/15;   // fastest plausible beat
+  const maxLagMs = 1000/0.3;  // slowest plausible beat we care about
+  const minLag = Math.max(1, Math.round(minLagMs/STEP_MS));
+  const maxLag = Math.min(nSamples-1, Math.round(maxLagMs/STEP_MS));
+  if (maxLag <= minLag) return null;
+
+  let bestLag = -1, bestCorr = -Infinity;
+  for (let lag=minLag; lag<=maxLag; lag++) {
+    let sum=0, cnt=0;
+    for (let i=0;i+lag<nSamples;i++) { sum+=grid[i]*grid[i+lag]; cnt++; }
+    if (cnt < 10) continue;
+    const corr = sum/cnt;
+    if (corr > bestCorr) { bestCorr=corr; bestLag=lag; }
   }
-  if (peakTimes.length < AMP_MIN_PEAKS) return null;
+  if (bestLag <= 0) return null;
 
-  const intervals=[];
-  for (let i=1;i<peakTimes.length;i++) intervals.push(peakTimes[i]-peakTimes[i-1]);
-  intervals.sort((a,b)=>a-b);
-  const mid = intervals[Math.floor(intervals.length/2)];
-  if (!mid || mid<=0) return null;
+  // Require the correlation peak to be reasonably strong relative to
+  // signal variance, otherwise we're just looking at noise.
+  let variance=0; for (let i=0;i<nSamples;i++) variance+=grid[i]*grid[i];
+  variance/=nSamples;
+  if (variance < 1e-6 || bestCorr < variance*0.15) return null;
 
-  const rate = 1000/mid;
-  // Sanity clamp: piano unison/beat rates realistically fall well under 15 Hz
+  const periodMs = bestLag*STEP_MS;
+  const rate = 1000/periodMs;
   if (rate > 15 || rate < 0.05) return null;
   return rate;
 }
