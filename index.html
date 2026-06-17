@@ -502,8 +502,22 @@ function detectBeat(data, sr, hFreq) {
       peaks.push({f:i*binSize,v:data[i]});
   }
   peaks.sort((a,b)=>b.v-a.v);
+
   if (peaks.length>=2) {
-    return { type:"diff", beat: Math.abs(peaks[0].f-peaks[1].f) };
+    // Require the two strongest peaks to be clearly separated (at least
+    // a few FFT bins apart) AND comparable in strength, otherwise this
+    // is very likely a sidelobe/noise bump next to a single real peak,
+    // not two genuinely detuned strings.
+    const top2 = [peaks[0], peaks[1]];
+    top2.sort((a,b)=>a.f-b.f);
+    const sepHz   = top2[1].f - top2[0].f;
+    const sepBins = sepHz / binSize;
+    const lvlDiff = Math.abs(peaks[0].v - peaks[1].v); // dB difference
+    if (sepBins >= 3 && lvlDiff <= 20) {
+      return { type:"diff", beat: sepHz };
+    }
+    // Fall through to amplitude-modulation tracking using the strongest peak
+    return { type:"amp", db: peaks[0].v };
   }
   if (peaks.length===1) {
     return { type:"amp", db: peaks[0].v };
@@ -664,7 +678,7 @@ function drawSpectroColumn(binSize) {
       const hf=currentFreq*(h+1);
       if (hf<viewLo||hf>viewHi) continue;
       const py=freqToY(hf,H);
-      offCtx.strokeStyle=selH[h]?"rgba(200,255,0,0.6)":"rgba(255,220,0,0.2)";
+      offCtx.strokeStyle=selH[h]?"rgba(0,0,0,0.85)":"rgba(255,220,0,0.2)";
       offCtx.lineWidth=selH[h]?1.5*dpr:dpr;
       offCtx.beginPath(); offCtx.moveTo(colX,py); offCtx.lineTo(colX+colW,py); offCtx.stroke();
     }
