@@ -240,12 +240,17 @@ let currentFreq  = null;
 let viewLo       = 10;
 let viewHi       = 4200; // default range matches reference app
 
-// Amplitude-modulation (single-peak beat) tracking, per harmonic
-let ampHistory   = Array.from({length:NUM_H}, ()=>[]); // [{t, db}]
-let ampLastBeat  = new Array(NUM_H).fill(null);  // last computed beat/s from amp modulation
+// Amplitude envelope peak-interval tracking, per harmonic.
+// We track the dB value of the harmonic each frame, detect local
+// maxima (peaks) in that envelope over time, and use the time gap
+// between consecutive peaks as the beat period.
+let ampEnv       = Array.from({length:NUM_H}, ()=>[]); // recent [{t, db}] samples
+let lastPeakTime = new Array(NUM_H).fill(null);  // timestamp of most recent confirmed peak
+let lastBeatRate = new Array(NUM_H).fill(null);  // last computed beat/s
+let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
-const AMP_WIN_MS   = 6000;  // how much history to keep
-const AMP_MIN_PEAKS= 4;     // need at least 4 amplitude peaks to estimate a period
+const ENV_KEEP_MS  = 1500;  // how much recent envelope history we need to detect a local max
+const PEAK_MIN_GAP_MS = 40; // refuse peaks closer together than this (avoid double-counting noise)
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 let offCanvas=null, offCtx=null;
@@ -525,61 +530,26 @@ function detectBeat(data, sr, hFreq) {
   return null;
 }
 
-// Estimate beat rate from amplitude history using autocorrelation
-// of the smoothed envelope. This is far more robust to FFT-frame
-// jitter / noise than naive peak-picking.
-function estimateAmpBeatRate(hist) {
-  if (hist.length < 30) return null;
-
-  const t0 = hist[0].t;
-  const tN = hist[hist.length-1].t;
-  const totalMs = tN - t0;
-  if (totalMs < 2000) return null; // need at least 2s of data
-
-  // Resample onto a uniform time grid (50ms steps) for autocorrelation
-  const STEP_MS = 50;
-  const nSamples = Math.floor(totalMs / STEP_MS);
-  if (nSamples < 20) return null;
-  const grid = new Float32Array(nSamples);
-  let hi = 0;
-  for (let i=0;i<nSamples;i++) {
-    const tt = t0 + i*STEP_MS;
-    while (hi < hist.length-1 && hist[hi+1].t <= tt) hi++;
-    grid[i] = hist[Math.min(hi,hist.length-1)].db;
+// Track the amplitude envelope of a harmonic and detect when a new
+// local-maximum (peak) occurs in it. Returns the confirmed peak time
+// if one was just detected, otherwise null.
+//
+// env: rolling array of {t, db} samples, newest pushed at the end.
+// We need at least 3 points to confirm the middle one was a peak
+// (i.e. value went up then down), and we require it be separated
+// from the previous confirmed peak by PEAK_MIN_GAP_MS to avoid
+// double-triggering on noisy frames.
+function detectEnvelopePeak(env, prevPeakTime) {
+  const n = env.length;
+  if (n < 3) return null;
+  const a = env[n-3], b = env[n-2], c = env[n-1];
+  if (b.db >= a.db && b.db >= c.db && b.db > a.db) {
+    // b is a local max
+    if (prevPeakTime === null || (b.t - prevPeakTime) >= PEAK_MIN_GAP_MS) {
+      return b.t;
+    }
   }
-
-  // Remove DC (mean) component
-  let mean=0; for (let i=0;i<nSamples;i++) mean+=grid[i]; mean/=nSamples;
-  for (let i=0;i<nSamples;i++) grid[i]-=mean;
-
-  // Autocorrelation across plausible beat periods:
-  // 0.05 Hz (20s period) .. 15 Hz (67ms period)
-  const minLagMs = 1000/15;   // fastest plausible beat
-  const maxLagMs = 1000/0.3;  // slowest plausible beat we care about
-  const minLag = Math.max(1, Math.round(minLagMs/STEP_MS));
-  const maxLag = Math.min(nSamples-1, Math.round(maxLagMs/STEP_MS));
-  if (maxLag <= minLag) return null;
-
-  let bestLag = -1, bestCorr = -Infinity;
-  for (let lag=minLag; lag<=maxLag; lag++) {
-    let sum=0, cnt=0;
-    for (let i=0;i+lag<nSamples;i++) { sum+=grid[i]*grid[i+lag]; cnt++; }
-    if (cnt < 10) continue;
-    const corr = sum/cnt;
-    if (corr > bestCorr) { bestCorr=corr; bestLag=lag; }
-  }
-  if (bestLag <= 0) return null;
-
-  // Require the correlation peak to be reasonably strong relative to
-  // signal variance, otherwise we're just looking at noise.
-  let variance=0; for (let i=0;i<nSamples;i++) variance+=grid[i]*grid[i];
-  variance/=nSamples;
-  if (variance < 1e-6 || bestCorr < variance*0.15) return null;
-
-  const periodMs = bestLag*STEP_MS;
-  const rate = 1000/periodMs;
-  if (rate > 15 || rate < 0.05) return null;
-  return rate;
+  return null;
 }
 
 function freqToNote(freq) {
@@ -613,26 +583,48 @@ function renderLoop() {
       beatHistory[h].push(result.beat);
       if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
-      // Reset amplitude tracking since we're in diff mode now
-      ampHistory[h]=[];
-      ampNullCount[h]=0;
+      // Reset envelope tracking since we're in diff mode now
+      ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0;
     } else if (result && result.type==="amp" && selH[h]) {
-      // Single peak → track amplitude envelope to find beat rate
-      // (only bother tracking for harmonics the user has selected, to save CPU)
+      // Single peak in frequency domain → this harmonic is "beating"
+      // in amplitude over time. Track its envelope and measure the
+      // time between successive envelope peaks directly.
       beatNullCount[h]=0;
       ampNullCount[h]=0;
-      ampHistory[h].push({t:now, db:result.db});
-      while (ampHistory[h].length && now - ampHistory[h][0].t > AMP_WIN_MS) ampHistory[h].shift();
-      const rate = estimateAmpBeatRate(ampHistory[h]);
-      if (rate!==null) {
-        ampLastBeat[h]=rate;
-        beatHistory[h].push(rate);
+      if (noteStartTime[h]===null) noteStartTime[h]=now;
+
+      ampEnv[h].push({t:now, db:result.db});
+      while (ampEnv[h].length && now - ampEnv[h][0].t > ENV_KEEP_MS) ampEnv[h].shift();
+
+      const peakT = detectEnvelopePeak(ampEnv[h], lastPeakTime[h]);
+      if (peakT !== null) {
+        if (lastPeakTime[h] !== null) {
+          const periodMs = peakT - lastPeakTime[h];
+          if (periodMs > 0) {
+            const rate = 1000/periodMs;
+            lastBeatRate[h] = rate;
+            beatHistory[h].push(rate);
+            if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+            statusVals[h]=rate<1.5?2:rate<5?1:0;
+          }
+        }
+        lastPeakTime[h] = peakT;
+      } else if (lastBeatRate[h] !== null) {
+        // No new peak yet this frame — keep showing the last measured rate
+        beatHistory[h].push(lastBeatRate[h]);
         if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
-        statusVals[h]=rate<1.5?2:rate<5?1:0;
-      } else if (ampLastBeat[h]!==null) {
-        // Not enough new data yet, but keep showing last known estimate
-        beatHistory[h].push(ampLastBeat[h]);
-        if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+      } else if (lastPeakTime[h] === null && noteStartTime[h] !== null) {
+        // No peak found yet at all since the note started (still waiting
+        // for the very first beat to complete). Per spec: estimate using
+        // elapsed time since note onset as a half-period, until either a
+        // real peak arrives or the note dies out.
+        const elapsedMs = now - noteStartTime[h];
+        if (elapsedMs > 30) {
+          const estPeriodMs = elapsedMs*2;
+          const estRate = 1000/estPeriodMs;
+          beatHistory[h].push(estRate);
+          if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+        }
       }
     } else {
       // Nothing detected (silence / note has died out)
@@ -640,7 +632,7 @@ function renderLoop() {
       ampNullCount[h]++;
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
         beatHistory[h]=[]; statusVals[h]=0;
-        ampHistory[h]=[]; ampLastBeat[h]=null;
+        ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null;
       }
     }
   }
@@ -771,7 +763,7 @@ function updateLevel(db) {
 function resetState() {
   currentFreq=null; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
-  ampHistory=Array.from({length:NUM_H},()=>[]); ampLastBeat=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
+  ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   viewLo=10; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
