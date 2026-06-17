@@ -240,6 +240,13 @@ let currentFreq  = null;
 let viewLo       = 10;
 let viewHi       = 4200; // default range matches reference app
 
+// Amplitude-modulation (single-peak beat) tracking, per harmonic
+let ampHistory   = Array.from({length:NUM_H}, ()=>[]); // [{t, db}]
+let ampLastBeat  = new Array(NUM_H).fill(null);  // last computed beat/s from amp modulation
+let ampNullCount = new Array(NUM_H).fill(0);
+const AMP_WIN_MS   = 4000;  // how much history to keep
+const AMP_MIN_PEAKS= 3;     // need at least 3 amplitude peaks to estimate a period
+
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 let offCanvas=null, offCtx=null;
 let lastAxisUpdate = 0;
@@ -495,8 +502,39 @@ function detectBeat(data, sr, hFreq) {
       peaks.push({f:i*binSize,v:data[i]});
   }
   peaks.sort((a,b)=>b.v-a.v);
-  if (peaks.length<2) return null;
-  return Math.abs(peaks[0].f-peaks[1].f);
+  if (peaks.length>=2) {
+    return { type:"diff", beat: Math.abs(peaks[0].f-peaks[1].f) };
+  }
+  if (peaks.length===1) {
+    return { type:"amp", db: peaks[0].v };
+  }
+  return null;
+}
+
+// Estimate beat rate from amplitude history by finding mean spacing
+// between local maxima (peak-picking on the envelope).
+function estimateAmpBeatRate(hist) {
+  if (hist.length < 8) return null;
+  // Light smoothing first
+  const sm = [];
+  for (let i=0;i<hist.length;i++) {
+    const s=Math.max(0,i-1), e=Math.min(hist.length-1,i+1);
+    let sum=0,cnt=0;
+    for (let j=s;j<=e;j++){ sum+=hist[j].db; cnt++; }
+    sm.push({t:hist[i].t, db:sum/cnt});
+  }
+  const peakTimes=[];
+  for (let i=1;i<sm.length-1;i++) {
+    if (sm[i].db>sm[i-1].db && sm[i].db>=sm[i+1].db) peakTimes.push(sm[i].t);
+  }
+  if (peakTimes.length < AMP_MIN_PEAKS) return null;
+  const intervals=[];
+  for (let i=1;i<peakTimes.length;i++) intervals.push(peakTimes[i]-peakTimes[i-1]);
+  intervals.sort((a,b)=>a-b);
+  // Use median interval for robustness against spurious peaks
+  const mid = intervals[Math.floor(intervals.length/2)];
+  if (!mid || mid<=0) return null;
+  return 1000/mid; // beats per second
 }
 
 function freqToNote(freq) {
@@ -519,17 +557,46 @@ function renderLoop() {
   const freq=detectPitch(fftData,sr);
   if (freq) { currentFreq=freq; updateNoteDisplay(freq); }
   const binSize=sr/FFT_SIZE;
+  const now=performance.now();
   for (let h=0;h<NUM_H;h++) {
     const hf=currentFreq?currentFreq*(h+1):null;
-    const beat=detectBeat(fftData,sr,hf);
-    if (beat!==null) {
+    const result=detectBeat(fftData,sr,hf);
+
+    if (result && result.type==="diff") {
+      // Two distinct peaks → direct frequency-difference beat rate
       beatNullCount[h]=0;
-      beatHistory[h].push(beat);
+      beatHistory[h].push(result.beat);
       if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
-      statusVals[h]=beat<0.08?2:beat<0.6?1:0;
+      statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
+      // Reset amplitude tracking since we're in diff mode now
+      ampHistory[h]=[];
+      ampNullCount[h]=0;
+    } else if (result && result.type==="amp" && selH[h]) {
+      // Single peak → track amplitude envelope to find beat rate
+      // (only bother tracking for harmonics the user has selected, to save CPU)
+      beatNullCount[h]=0;
+      ampNullCount[h]=0;
+      ampHistory[h].push({t:now, db:result.db});
+      while (ampHistory[h].length && now - ampHistory[h][0].t > AMP_WIN_MS) ampHistory[h].shift();
+      const rate = estimateAmpBeatRate(ampHistory[h]);
+      if (rate!==null) {
+        ampLastBeat[h]=rate;
+        beatHistory[h].push(rate);
+        if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+        statusVals[h]=rate<1.5?2:rate<5?1:0;
+      } else if (ampLastBeat[h]!==null) {
+        // Not enough new data yet, but keep showing last known estimate
+        beatHistory[h].push(ampLastBeat[h]);
+        if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+      }
     } else {
+      // Nothing detected (silence / note has died out)
       beatNullCount[h]++;
-      if (beatNullCount[h]>BEAT_NULL_THRESH) { beatHistory[h]=[]; statusVals[h]=0; }
+      ampNullCount[h]++;
+      if (beatNullCount[h]>BEAT_NULL_THRESH) {
+        beatHistory[h]=[]; statusVals[h]=0;
+        ampHistory[h]=[]; ampLastBeat[h]=null;
+      }
     }
   }
   drawSpectroColumn(binSize);
@@ -659,6 +726,7 @@ function updateLevel(db) {
 function resetState() {
   currentFreq=null; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
+  ampHistory=Array.from({length:NUM_H},()=>[]); ampLastBeat=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   viewLo=10; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
