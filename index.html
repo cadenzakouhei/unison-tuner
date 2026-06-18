@@ -250,7 +250,7 @@ let lastBeatRate = new Array(NUM_H).fill(null);  // last computed beat/s
 let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
 const ENV_KEEP_MS  = 1500;  // how much recent envelope history we need to detect a local max
-const PEAK_MIN_GAP_MS = 40; // refuse peaks closer together than this (avoid double-counting noise)
+const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 let offCanvas=null, offCtx=null;
@@ -535,18 +535,31 @@ function detectBeat(data, sr, hFreq) {
 // if one was just detected, otherwise null.
 //
 // env: rolling array of {t, db} samples, newest pushed at the end.
-// We need at least 3 points to confirm the middle one was a peak
-// (i.e. value went up then down), and we require it be separated
-// from the previous confirmed peak by PEAK_MIN_GAP_MS to avoid
-// double-triggering on noisy frames.
+// Raw per-frame dB values are noisy (FFT bin jitter), so we first
+// apply light smoothing over a short trailing window, then look for
+// a genuine local max in the smoothed curve. We also enforce a
+// minimum gap between confirmed peaks corresponding to a realistic
+// upper bound on piano beat rates (~10 Hz → 100ms) so that residual
+// noise wiggles can't be double-counted as separate beats.
+function smoothedDb(env, idx, halfWin) {
+  const s = Math.max(0, idx-halfWin), e = Math.min(env.length-1, idx+halfWin);
+  let sum=0, cnt=0;
+  for (let i=s;i<=e;i++) { sum+=env[i].db; cnt++; }
+  return sum/cnt;
+}
+
 function detectEnvelopePeak(env, prevPeakTime) {
   const n = env.length;
-  if (n < 3) return null;
-  const a = env[n-3], b = env[n-2], c = env[n-1];
-  if (b.db >= a.db && b.db >= c.db && b.db > a.db) {
-    // b is a local max
-    if (prevPeakTime === null || (b.t - prevPeakTime) >= PEAK_MIN_GAP_MS) {
-      return b.t;
+  if (n < 7) return null; // need enough samples for smoothing + 3-point check
+  const halfWin = 2; // ~5-sample smoothing window
+  const idx = n-3; // check the point 2 frames back so it has neighbours on both sides
+  const aS = smoothedDb(env, idx-1, halfWin);
+  const bS = smoothedDb(env, idx,   halfWin);
+  const cS = smoothedDb(env, idx+1, halfWin);
+  if (bS >= aS && bS >= cS && bS > aS) {
+    const peakTime = env[idx].t;
+    if (prevPeakTime === null || (peakTime - prevPeakTime) >= PEAK_MIN_GAP_MS) {
+      return peakTime;
     }
   }
   return null;
