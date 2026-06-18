@@ -249,7 +249,7 @@ let lastPeakTime = new Array(NUM_H).fill(null);  // timestamp of most recent con
 let lastBeatRate = new Array(NUM_H).fill(null);  // last computed beat/s
 let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
-const ENV_KEEP_MS  = 1500;  // how much recent envelope history we need to detect a local max
+const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
@@ -550,9 +550,9 @@ function smoothedDb(env, idx, halfWin) {
 
 function detectEnvelopePeak(env, prevPeakTime) {
   const n = env.length;
-  if (n < 7) return null; // need enough samples for smoothing + 3-point check
-  const halfWin = 2; // ~5-sample smoothing window
-  const idx = n-3; // check the point 2 frames back so it has neighbours on both sides
+  const halfWin = 7; // ~15-sample smoothing window
+  if (n < halfWin*2+5) return null; // need enough samples for full smoothing on both sides
+  const idx = n - halfWin - 2; // leave room for halfWin neighbours on the right
   const aS = smoothedDb(env, idx-1, halfWin);
   const bS = smoothedDb(env, idx,   halfWin);
   const cS = smoothedDb(env, idx+1, halfWin);
