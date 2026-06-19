@@ -801,6 +801,9 @@ document.getElementById("scale-toggle").addEventListener("click", function() {
   document.getElementById("scale-label").textContent=logScale?"LOG":"LIN";
   this.style.background=logScale?"#2255aa":"#446622";
   document.getElementById("scale-knob").style.left=logScale?"2px":"18px";
+  // Reset view range on scale-mode switch so leftover zoom/scroll from
+  // the other mode doesn't carry over and confuse the new scale.
+  viewLo=10; viewHi=4200;
   if (offCtx&&offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
