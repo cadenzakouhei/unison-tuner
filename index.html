@@ -438,7 +438,7 @@ async function startMic() {
     gainNode.gain.value = gainVal;
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.65;
+    analyser.smoothingTimeConstant = 0.5;
     fftData  = new Float32Array(analyser.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
@@ -509,16 +509,17 @@ function detectBeat(data, sr, hFreq) {
   peaks.sort((a,b)=>b.v-a.v);
 
   if (peaks.length>=2) {
-    // Require the two strongest peaks to be clearly separated (at least
-    // a few FFT bins apart) AND comparable in strength, otherwise this
-    // is very likely a sidelobe/noise bump next to a single real peak,
-    // not two genuinely detuned strings.
+    // Require the two strongest peaks to be clearly separated AND
+    // comparable in strength, otherwise this is very likely a
+    // sidelobe/noise bump next to a single real peak, not two
+    // genuinely detuned strings. Higher harmonics need a stricter
+    // bin-separation requirement since sidelobes get denser there.
     const top2 = [peaks[0], peaks[1]];
     top2.sort((a,b)=>a.f-b.f);
     const sepHz   = top2[1].f - top2[0].f;
     const sepBins = sepHz / binSize;
     const lvlDiff = Math.abs(peaks[0].v - peaks[1].v); // dB difference
-    if (sepBins >= 3 && lvlDiff <= 20) {
+    if (sepBins >= 4 && lvlDiff <= 10) {
       return { type:"diff", beat: sepHz };
     }
     // Fall through to amplitude-modulation tracking using the strongest peak
