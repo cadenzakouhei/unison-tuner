@@ -253,8 +253,11 @@ let ampNullCount = new Array(NUM_H).fill(0);
 let noteDuration = new Array(NUM_H).fill(null);  // seconds from onset to the note dying out (held until next note starts)
 let noteIsActive = new Array(NUM_H).fill(false); // whether this harmonic is currently sounding
 let noteOnsetTime= new Array(NUM_H).fill(null);  // performance.now() timestamp when current note started sounding
+let hysteresisOn = new Array(NUM_H).fill(false); // hysteresis latch: true once loud enough to start, false once quiet enough to stop
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
+const ONSET_DB_THRESHOLD = -90; // must reach at least this loud to be considered "sounding" (start)
+const STOP_DB_THRESHOLD  = -68; // must drop below this to be considered "silent" (stop) — hysteresis to avoid re-triggering on small noise
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 let offCanvas=null, offCtx=null;
@@ -558,7 +561,7 @@ function detectBeat(data, sr, hFreq) {
     const sepBins = sepHz / binSize;
     const lvlDiff = Math.abs(peaks[0].v - peaks[1].v); // dB difference
     if (sepBins >= 4 && lvlDiff <= 10) {
-      return { type:"diff", beat: sepHz };
+      return { type:"diff", beat: sepHz, db: Math.max(peaks[0].v, peaks[1].v) };
     }
     // Fall through to amplitude-modulation tracking using the strongest peak
     return { type:"amp", db: peaks[0].v };
@@ -628,7 +631,18 @@ function renderLoop() {
   for (let h=0;h<NUM_H;h++) {
     const hf=currentFreq?currentFreq*(h+1):null;
     const result=detectBeat(fftData,sr,hf);
-    const soundingNow = result !== null;
+    const curDb = result ? result.db : -Infinity;
+
+    // Hysteresis-based onset/stop detection: must reach ONSET_DB_THRESHOLD
+    // to latch "on" (start counting), and must drop below STOP_DB_THRESHOLD
+    // to latch back "off" (stop counting). This avoids small ambient noise
+    // or sympathetic resonance repeatedly re-triggering the duration timer.
+    if (!hysteresisOn[h] && curDb >= ONSET_DB_THRESHOLD) {
+      hysteresisOn[h] = true;
+    } else if (hysteresisOn[h] && curDb < STOP_DB_THRESHOLD) {
+      hysteresisOn[h] = false;
+    }
+    const soundingNow = hysteresisOn[h];
 
     // Duration tracking: independent of diff/amp beat-rate logic.
     // Starts counting the moment this harmonic is first detected as
@@ -640,6 +654,16 @@ function renderLoop() {
         noteOnsetTime[h] = now;
         noteDuration[h] = null; // clear old frozen value now that a new note has begun
       }
+    }
+
+    if (!soundingNow && noteIsActive[h]) {
+      // Hysteresis just latched "off" — freeze the duration value now,
+      // independent of the separate beat-rate null-count timing below.
+      if (noteOnsetTime[h]!==null) {
+        noteDuration[h] = (now - noteOnsetTime[h]) / 1000;
+      }
+      noteIsActive[h] = false;
+      noteOnsetTime[h] = null;
     }
 
     if (result && result.type==="diff") {
@@ -698,12 +722,6 @@ function renderLoop() {
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
         beatHistory[h]=[]; statusVals[h]=0;
         ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null;
-        // Note has definitively died out — freeze the duration value.
-        if (noteIsActive[h] && noteOnsetTime[h]!==null) {
-          noteDuration[h] = (now - noteOnsetTime[h]) / 1000;
-        }
-        noteIsActive[h] = false;
-        noteOnsetTime[h] = null;
       }
     }
   }
@@ -848,7 +866,7 @@ function resetState() {
   currentFreq=null; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
-  noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null);
+  noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false);
   viewLo=10; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
