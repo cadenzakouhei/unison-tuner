@@ -397,26 +397,27 @@ swrap.addEventListener("touchmove", e => {
   if (e.touches.length === 1 && scrollY0 !== null) {
     const rect = spectroCanvas.getBoundingClientRect();
     const H    = rect.height;
-    const dragPx = e.touches[0].clientY - scrollY0;
+    const curY = e.touches[0].clientY;
+    const dragPx = curY - scrollY0;
+    scrollY0 = curY; // incremental: always diff against the previous frame, never a stale start point
 
     if (logScale) {
       // Work in log2 space, which is what actually maps linearly to
       // pixel position on screen when logScale is active.
-      const logLo0 = Math.log2(Math.max(1, scrollLo0));
-      const logHi0 = Math.log2(scrollHi0);
+      const logLo0 = Math.log2(Math.max(1, viewLo));
+      const logHi0 = Math.log2(viewHi);
       const logRange = logHi0 - logLo0;
       const shift = (dragPx / H) * logRange;
       let logLo = logLo0 + shift, logHi = logHi0 + shift;
       let lo = Math.pow(2, logLo), hi = Math.pow(2, logHi);
-      const range = hi - lo;
       if (lo < FREQ_LO) { lo = FREQ_LO; hi = Math.pow(2, Math.log2(lo) + logRange); }
       if (hi > FREQ_HI) { hi = FREQ_HI; lo = Math.pow(2, Math.log2(hi) - logRange); }
       if (lo < FREQ_LO) lo = FREQ_LO;
       viewLo = lo; viewHi = hi;
     } else {
-      const range = scrollHi0 - scrollLo0;
+      const range = viewHi - viewLo;
       const shift = (dragPx / H) * range;
-      let lo = scrollLo0 + shift, hi = scrollHi0 + shift;
+      let lo = viewLo + shift, hi = viewHi + shift;
       if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+range; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
       viewLo=lo; viewHi=hi;
@@ -461,6 +462,12 @@ swrap.addEventListener("touchend", e => {
     pinchDist0=null;
     scrollY0=e.touches[0].clientY; scrollLo0=viewLo; scrollHi0=viewHi;
   }
+});
+swrap.addEventListener("touchcancel", e => {
+  // Safari can fire touchcancel instead of touchend on interrupted
+  // gestures (notifications, screenshots, etc). Always fully reset so
+  // a stale scrollY0/pinchDist0 doesn't break the next gesture.
+  scrollY0=null; pinchDist0=null;
 });
 
 // ── Mic ────────────────────────────────────────────────────
