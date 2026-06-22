@@ -122,6 +122,7 @@ border-radius: 6px; padding: 4px 3px; text-align: center; transition: border-col
 .beat-card .bc-h { font-size: 10px; color: #555; }
 .beat-card .bc-val { font-size: 20px; font-weight: bold; line-height: 1.1; }
 .beat-card .bc-unit { font-size: 9px; color: #555; }
+.beat-card .bc-dur { font-size: 11px; color: #6a9; margin-top: 2px; }
 
 /* Controls */
 #controls {
@@ -249,6 +250,9 @@ let lastPeakTime = new Array(NUM_H).fill(null);  // timestamp of most recent con
 let lastBeatRate = new Array(NUM_H).fill(null);  // last computed beat/s
 let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
+let noteDuration = new Array(NUM_H).fill(null);  // seconds from onset to the note dying out (held until next note starts)
+let noteIsActive = new Array(NUM_H).fill(false); // whether this harmonic is currently sounding
+let noteOnsetTime= new Array(NUM_H).fill(null);  // performance.now() timestamp when current note started sounding
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 
@@ -329,7 +333,7 @@ for (let h = 0; h < NUM_H; h++) {
   card.className = "beat-card";
   card.id = "bcard"+h;
   card.style.display = "none";
-  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#888">—</div><div class="bc-unit">beat/s</div>`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#888">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}">— s</div>`;
   beatBarEl.appendChild(card);
   beatCards[h] = card;
 }
@@ -388,28 +392,62 @@ swrap.addEventListener("touchstart", e => {
 swrap.addEventListener("touchmove", e => {
   e.preventDefault();
   if (e.touches.length === 1 && scrollY0 !== null) {
-    const rect   = spectroCanvas.getBoundingClientRect();
+    const rect = spectroCanvas.getBoundingClientRect();
+    const H    = rect.height;
     const dragPx = e.touches[0].clientY - scrollY0;
-    const range  = scrollHi0 - scrollLo0;
-    const shift  = (dragPx / rect.height) * range;
-    let lo = scrollLo0 + shift, hi = scrollHi0 + shift;
-    if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+range; }
-    if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
-    viewLo=lo; viewHi=hi;
+
+    if (logScale) {
+      // Work in log2 space, which is what actually maps linearly to
+      // pixel position on screen when logScale is active.
+      const logLo0 = Math.log2(Math.max(1, scrollLo0));
+      const logHi0 = Math.log2(scrollHi0);
+      const logRange = logHi0 - logLo0;
+      const shift = (dragPx / H) * logRange;
+      let logLo = logLo0 + shift, logHi = logHi0 + shift;
+      let lo = Math.pow(2, logLo), hi = Math.pow(2, logHi);
+      const range = hi - lo;
+      if (lo < FREQ_LO) { lo = FREQ_LO; hi = Math.pow(2, Math.log2(lo) + logRange); }
+      if (hi > FREQ_HI) { hi = FREQ_HI; lo = Math.pow(2, Math.log2(hi) - logRange); }
+      if (lo < FREQ_LO) lo = FREQ_LO;
+      viewLo = lo; viewHi = hi;
+    } else {
+      const range = scrollHi0 - scrollLo0;
+      const shift = (dragPx / H) * range;
+      let lo = scrollLo0 + shift, hi = scrollHi0 + shift;
+      if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+range; }
+      if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
+      viewLo=lo; viewHi=hi;
+    }
     if (offCtx) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   } else if (e.touches.length === 2 && pinchDist0 !== null) {
     const dx   = e.touches[0].clientX - e.touches[1].clientX;
     const dy   = e.touches[0].clientY - e.touches[1].clientY;
     const dist = Math.sqrt(dx*dx+dy*dy);
     const scale= pinchDist0 / dist;
-    const origRange = pinchHi0 - pinchLo0;
-    const newRange  = Math.max(50, Math.min(FREQ_HI-FREQ_LO, origRange*scale));
-    let lo = pinchCF - newRange * ((pinchCF - pinchLo0) / origRange);
-    let hi = lo + newRange;
-    if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+newRange; }
-    if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-newRange; }
-    if (lo < FREQ_LO) lo=FREQ_LO;
-    viewLo=lo; viewHi=hi;
+
+    if (logScale) {
+      const logLo0 = Math.log2(Math.max(1, pinchLo0));
+      const logHi0 = Math.log2(pinchHi0);
+      const logCF  = Math.log2(Math.max(1, pinchCF));
+      const origLogRange = logHi0 - logLo0;
+      const newLogRange  = origLogRange * scale;
+      let logLo = logCF - newLogRange * ((logCF - logLo0) / origLogRange);
+      let logHi = logLo + newLogRange;
+      let lo = Math.pow(2, logLo), hi = Math.pow(2, logHi);
+      if (lo < FREQ_LO) { lo = FREQ_LO; logLo = Math.log2(lo); hi = Math.pow(2, logLo+newLogRange); }
+      if (hi > FREQ_HI) { hi = FREQ_HI; logHi = Math.log2(hi); lo = Math.pow(2, logHi-newLogRange); }
+      if (lo < FREQ_LO) lo = FREQ_LO;
+      viewLo = lo; viewHi = hi;
+    } else {
+      const origRange = pinchHi0 - pinchLo0;
+      const newRange  = Math.max(50, Math.min(FREQ_HI-FREQ_LO, origRange*scale));
+      let lo = pinchCF - newRange * ((pinchCF - pinchLo0) / origRange);
+      let hi = lo + newRange;
+      if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+newRange; }
+      if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-newRange; }
+      if (lo < FREQ_LO) lo=FREQ_LO;
+      viewLo=lo; viewHi=hi;
+    }
     if (offCtx) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   }
 }, {passive:false});
@@ -590,6 +628,19 @@ function renderLoop() {
   for (let h=0;h<NUM_H;h++) {
     const hf=currentFreq?currentFreq*(h+1):null;
     const result=detectBeat(fftData,sr,hf);
+    const soundingNow = result !== null;
+
+    // Duration tracking: independent of diff/amp beat-rate logic.
+    // Starts counting the moment this harmonic is first detected as
+    // sounding, and freezes the displayed value the moment it stops
+    // being detected (kept frozen until the next note onset).
+    if (soundingNow) {
+      if (!noteIsActive[h]) {
+        noteIsActive[h] = true;
+        noteOnsetTime[h] = now;
+        noteDuration[h] = null; // clear old frozen value now that a new note has begun
+      }
+    }
 
     if (result && result.type==="diff") {
       // Two distinct peaks → direct frequency-difference beat rate
@@ -647,6 +698,12 @@ function renderLoop() {
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
         beatHistory[h]=[]; statusVals[h]=0;
         ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null;
+        // Note has definitively died out — freeze the duration value.
+        if (noteIsActive[h] && noteOnsetTime[h]!==null) {
+          noteDuration[h] = (now - noteOnsetTime[h]) / 1000;
+        }
+        noteIsActive[h] = false;
+        noteOnsetTime[h] = null;
       }
     }
   }
@@ -731,9 +788,11 @@ function updateFreqAxisLabels() {
 // ── Beat display ───────────────────────────────────────────
 function updateBeatDisplay() {
   let any=false;
+  const now=performance.now();
   for (let h=0;h<NUM_H;h++) {
     const on=selH[h], card=beatCards[h];
     const valEl=document.getElementById("bcv"+h);
+    const durEl=document.getElementById("bcd"+h);
     const hist=beatHistory[h], st=statusVals[h];
     card.style.display=on?"block":"none";
     if (!on) continue;
@@ -745,6 +804,17 @@ function updateBeatDisplay() {
       const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
       return avg<0.005?"0.00":avg.toFixed(2);
     })();
+
+    // Duration: while the note is actively sounding, show the live
+    // elapsed time; once it dies out, freeze on the final value until
+    // the next note onset clears it.
+    if (noteIsActive[h] && noteOnsetTime[h]!==null) {
+      durEl.textContent = ((now - noteOnsetTime[h])/1000).toFixed(1) + " s";
+    } else if (noteDuration[h]!==null) {
+      durEl.textContent = noteDuration[h].toFixed(1) + " s";
+    } else {
+      durEl.textContent = "— s";
+    }
   }
   document.getElementById("beat-bar-empty").style.display=any?"none":"block";
 }
@@ -778,6 +848,7 @@ function resetState() {
   currentFreq=null; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
+  noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null);
   viewLo=10; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
