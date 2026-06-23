@@ -421,11 +421,14 @@ swrap.addEventListener("touchmove", e => {
       viewLo = lo; viewHi = hi;
     } else {
       // Same fixed-sensitivity approach for linear mode.
-      const fullRange = FREQ_HI - FREQ_LO;
+      // LIN mode's true floor is 0Hz (not FREQ_LO, which exists only
+      // because log2(0) is undefined for LOG mode).
+      const LIN_FLOOR = 0;
+      const fullRange = FREQ_HI - LIN_FLOOR;
       const range = viewHi - viewLo;
       const shift = (dragPx / H) * fullRange * 0.6;
       let lo = viewLo + shift, hi = viewHi + shift;
-      if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+range; }
+      if (lo < LIN_FLOOR) { lo=LIN_FLOOR; hi=lo+range; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
       viewLo=lo; viewHi=hi;
     }
@@ -450,13 +453,14 @@ swrap.addEventListener("touchmove", e => {
       if (lo < FREQ_LO) lo = FREQ_LO;
       viewLo = lo; viewHi = hi;
     } else {
+      const LIN_FLOOR = 0;
       const origRange = pinchHi0 - pinchLo0;
-      const newRange  = Math.max(50, Math.min(FREQ_HI-FREQ_LO, origRange*scale));
+      const newRange  = Math.max(50, Math.min(FREQ_HI-LIN_FLOOR, origRange*scale));
       let lo = pinchCF - newRange * ((pinchCF - pinchLo0) / origRange);
       let hi = lo + newRange;
-      if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+newRange; }
+      if (lo < LIN_FLOOR) { lo=LIN_FLOOR; hi=lo+newRange; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-newRange; }
-      if (lo < FREQ_LO) lo=FREQ_LO;
+      if (lo < LIN_FLOOR) lo=LIN_FLOOR;
       viewLo=lo; viewHi=hi;
     }
     if (offCtx) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
