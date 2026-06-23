@@ -206,7 +206,7 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 <div id="controls">
   <div class="ctrl-row">
     <span class="ctrl-label">GAIN</span>
-    <input type="range" id="sl-gain" min="10" max="24" step="1" value="20">
+    <input type="range" id="sl-gain" min="10" max="90" step="1" value="20">
     <span class="ctrl-val" id="vl-gain">20 dB</span>
   </div>
   <div class="ctrl-row">
@@ -238,7 +238,7 @@ let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
 let beatNullCount= new Array(NUM_H).fill(0);
 let statusVals   = new Array(NUM_H).fill(0);
 let currentFreq  = null;
-let viewLo       = 10;
+let viewLo       = 0;
 let viewHi       = 4200; // default range matches reference app
 
 // Amplitude envelope peak-interval tracking, per harmonic.
@@ -404,10 +404,14 @@ swrap.addEventListener("touchmove", e => {
     if (logScale) {
       // Work in log2 space, which is what actually maps linearly to
       // pixel position on screen when logScale is active.
+      // Use a fixed sensitivity (relative to the full log-range) rather
+      // than the current zoomed range, so scrolling never feels "stuck"
+      // even when heavily zoomed in.
+      const fullLogRange = Math.log2(FREQ_HI) - Math.log2(Math.max(1,FREQ_LO));
       const logLo0 = Math.log2(Math.max(1, viewLo));
       const logHi0 = Math.log2(viewHi);
       const logRange = logHi0 - logLo0;
-      const shift = (dragPx / H) * logRange;
+      const shift = (dragPx / H) * fullLogRange * 0.6;
       let logLo = logLo0 + shift, logHi = logHi0 + shift;
       let lo = Math.pow(2, logLo), hi = Math.pow(2, logHi);
       if (lo < FREQ_LO) { lo = FREQ_LO; hi = Math.pow(2, Math.log2(lo) + logRange); }
@@ -415,8 +419,10 @@ swrap.addEventListener("touchmove", e => {
       if (lo < FREQ_LO) lo = FREQ_LO;
       viewLo = lo; viewHi = hi;
     } else {
+      // Same fixed-sensitivity approach for linear mode.
+      const fullRange = FREQ_HI - FREQ_LO;
       const range = viewHi - viewLo;
-      const shift = (dragPx / H) * range;
+      const shift = (dragPx / H) * fullRange * 0.6;
       let lo = viewLo + shift, hi = viewHi + shift;
       if (lo < FREQ_LO) { lo=FREQ_LO; hi=lo+range; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
@@ -874,7 +880,7 @@ function resetState() {
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false);
-  viewLo=10; viewHi=4200;
+  viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
 
@@ -899,7 +905,7 @@ document.getElementById("scale-toggle").addEventListener("click", function() {
   document.getElementById("scale-knob").style.left=logScale?"2px":"18px";
   // Reset view range on scale-mode switch so leftover zoom/scroll from
   // the other mode doesn't carry over and confuse the new scale.
-  viewLo=10; viewHi=4200;
+  viewLo=logScale?10:0; viewHi=4200;
   if (offCtx&&offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
