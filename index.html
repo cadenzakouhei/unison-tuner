@@ -43,12 +43,12 @@ display: flex; align-items: center; gap: 14px;
 padding: 2px 2px;
 }
 #note-group {
-display: flex; align-items: baseline; gap: 6px; flex-shrink: 0;
+display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0;
 }
-#note-big { font-size: 17px; font-weight: bold; color: #fff; line-height: 1; flex-shrink: 0; }
+#note-big { font-size: 26px; font-weight: bold; color: #fff; line-height: 1; flex-shrink: 0; }
 #note-sub { font-size: 10px; color: #888; flex-shrink: 0; }
 #level-group {
-flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0;
+width: 150px; flex-shrink: 0; display: flex; align-items: center; gap: 6px; min-width: 0;
 }
 #level-label { font-size: 10px; color: #888; flex-shrink: 0; }
 #level-db { font-size: 10px; color: #888; flex-shrink: 0; }
@@ -113,18 +113,18 @@ border-radius: 2px; position: relative;
 /* Beat bar */
 #beat-bar {
 background: #1a1a1a; border-top: 1px solid #333;
-padding: 6px 10px; display: flex; gap: 5px; flex-wrap: wrap;
-min-height: 58px; align-items: center; flex-shrink: 0;
+padding: 4px 10px; display: flex; gap: 5px; flex-wrap: wrap;
+min-height: 39px; align-items: center; flex-shrink: 0;
 }
-#beat-bar-empty { font-size: 12px; color: #444; width: 100%; text-align: center; }
+#beat-bar-empty { font-size: 11px; color: #444; width: 100%; text-align: center; }
 .beat-card {
 flex: 1; min-width: 56px; background: #111; border: 1px solid #2a2a2a;
-border-radius: 6px; padding: 4px 3px; text-align: center; transition: border-color 0.2s;
+border-radius: 5px; padding: 3px 3px; text-align: center; transition: border-color 0.2s;
 }
-.beat-card .bc-h { font-size: 10px; color: #555; }
-.beat-card .bc-val { font-size: 20px; font-weight: bold; line-height: 1.1; }
-.beat-card .bc-unit { font-size: 9px; color: #555; }
-.beat-card .bc-dur { font-size: 11px; color: #6a9; margin-top: 2px; }
+.beat-card .bc-h { font-size: 8px; color: #555; }
+.beat-card .bc-val { font-size: 14px; font-weight: bold; line-height: 1.1; }
+.beat-card .bc-unit { font-size: 7px; color: #555; }
+.beat-card .bc-dur { font-size: 8px; color: #6a9; margin-top: 1px; }
 
 /* Controls */
 #controls {
@@ -257,8 +257,8 @@ let noteOnsetTime= new Array(NUM_H).fill(null);  // performance.now() timestamp 
 let hysteresisOn = new Array(NUM_H).fill(false); // hysteresis latch: true once loud enough to start, false once quiet enough to stop
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
-const ONSET_DB_THRESHOLD = -90; // must reach at least this loud to be considered "sounding" (start)
-const STOP_DB_THRESHOLD  = -68; // must drop below this to be considered "silent" (stop) — hysteresis to avoid re-triggering on small noise
+const ONSET_DB_THRESHOLD = -30; // must reach at least this loud to be considered "sounding" (start)
+const STOP_DB_THRESHOLD  = -80; // must drop below this to be considered "silent" (stop) — hysteresis to avoid re-triggering on small noise
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
 let offCanvas=null, offCtx=null;
