@@ -92,6 +92,18 @@ spectrogram keeps as much vertical space as possible. */
 display: flex; flex-direction: column; flex-shrink: 0;
 }
 #spectro-outer { flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative; }
+#freq-ruler {
+width: 52px; flex-shrink: 0; position: relative;
+background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
+}
+.ruler-label {
+position: absolute; right: 4px; font-size: 10px; color: #ccc;
+transform: translateY(-50%); white-space: nowrap;
+}
+.ruler-tick {
+position: absolute; right: 0; width: 6px; height: 1px;
+background: #555; transform: translateY(-50%);
+}
 #spectro-canvas-wrap {
 flex: 1; position: relative; overflow: hidden; touch-action: none;
 }
@@ -188,6 +200,7 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 
 <div id="spectro-section">
   <div id="spectro-outer">
+    <div id="freq-ruler"></div>
     <div id="spectro-canvas-wrap">
       <canvas id="spectro-canvas"></canvas>
       <div id="freq-axis"></div>
@@ -804,25 +817,37 @@ function drawSpectroColumn(binSize) {
 }
 
 // ── Freq axis labels ───────────────────────────────────────
+const freqRulerEl = document.getElementById("freq-ruler");
+
 function updateFreqAxisLabels() {
   const now=Date.now();
   if (now-lastAxisUpdate<300) return;
   lastAxisUpdate=now;
   freqAxisEl.innerHTML="";
+  freqRulerEl.innerHTML="";
   const H=spectroCanvas.clientHeight||300;
   if (H<10) return;
+  const LABEL_MARGIN = 9; // half label height, roughly — keeps labels from clipping at the edges
+
+  // Left-side ruler: tick + number, independent column outside the graph.
   const grids=[0,20,50,100,200,500,1000,2000,3000,4000,5000,6000,7000,8000,9000,10000];
   grids.forEach(f=>{
     if (f<viewLo||f>viewHi) return;
     const y=freqToY(f,H);
     if (y<0||y>H) return;
+    const clampedY = Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y));
+    const tick=document.createElement("div");
+    tick.className="ruler-tick";
+    tick.style.top=clampedY+"px";
+    freqRulerEl.appendChild(tick);
     const lbl=document.createElement("div");
-    lbl.className="freq-label";
-    lbl.style.top=y+"px";
-    lbl.style.color="rgba(255,255,255,0.7)";
+    lbl.className="ruler-label";
+    lbl.style.top=clampedY+"px";
     lbl.textContent=f>=1000?(f/1000)+"kHz":f+"Hz";
-    freqAxisEl.appendChild(lbl);
+    freqRulerEl.appendChild(lbl);
   });
+
+  // In-graph harmonic labels, kept inside the spectrogram area.
   if (currentFreq) {
     for (let h=0;h<NUM_H;h++) {
       const hf=currentFreq*(h+1);
@@ -831,7 +856,7 @@ function updateFreqAxisLabels() {
       if (y<0||y>H) continue;
       const lbl=document.createElement("div");
       lbl.className="freq-label";
-      lbl.style.top=y+"px";
+      lbl.style.top=Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y))+"px";
       lbl.style.color=selH[h]?"rgba(0,255,85,0.95)":"rgba(255,220,100,0.6)";
       lbl.textContent=`H${h+1} ${hf.toFixed(0)}Hz`;
       freqAxisEl.appendChild(lbl);
