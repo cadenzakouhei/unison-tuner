@@ -46,12 +46,12 @@ padding: 2px 2px;
 display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0;
 }
 #note-big { font-size: 26px; font-weight: bold; color: #fff; line-height: 1; flex-shrink: 0; }
-#note-sub { font-size: 10px; color: #888; flex-shrink: 0; }
+#note-sub { font-size: 10px; color: #ddd; flex-shrink: 0; }
 #level-group {
 width: 150px; flex-shrink: 0; display: flex; align-items: center; gap: 6px; min-width: 0;
 }
-#level-label { font-size: 10px; color: #888; flex-shrink: 0; }
-#level-db { font-size: 10px; color: #888; flex-shrink: 0; }
+#level-label { font-size: 10px; color: #ddd; flex-shrink: 0; }
+#level-db { font-size: 10px; color: #ddd; flex-shrink: 0; }
 #level-bar-wrap {
 flex: 1; height: 8px; background: #000; border-radius: 3px;
 overflow: hidden; border: 1px solid #333; min-width: 0;
@@ -61,7 +61,7 @@ overflow: hidden; border: 1px solid #333; min-width: 0;
 /* Section label */
 .section-label {
 background: #1a1a1a; border-top: 1px solid #333; border-bottom: 1px solid #333;
-padding: 4px 12px; font-size: 11px; color: #888;
+padding: 4px 12px; font-size: 11px; color: #ddd;
 display: flex; justify-content: space-between; align-items: center;
 flex-shrink: 0;
 }
@@ -72,15 +72,15 @@ background: #161616; border-bottom: 1px solid #2a2a2a;
 padding: 6px 10px; display: flex; gap: 5px;
 align-items: center; flex-shrink: 0;
 }
-#harmonic-select .hs-label { font-size: 11px; color: #666; flex-shrink: 0; margin-right: 2px; }
+#harmonic-select .hs-label { font-size: 11px; color: #ccc; flex-shrink: 0; margin-right: 2px; }
 .hs-btn {
 flex: 1; background: #1a1a1a; border: 1.5px solid #2a2a2a;
-border-radius: 6px; color: #555; font-size: 12px;
+border-radius: 6px; color: #ccc; font-size: 12px;
 font-family: -apple-system, sans-serif; padding: 6px 2px;
 cursor: pointer; -webkit-appearance: none; text-align: center;
 transition: all 0.15s; user-select: none;
 }
-.hs-btn.selected { background: #1a2a00; border-color: #ccff00; color: #ccff00; }
+.hs-btn.selected { background: #0a2a10; border-color: #00cc44; color: #00ff55; }
 
 /* Spectrogram */
 #spectro-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; position: relative; }
@@ -123,14 +123,14 @@ background: #1a1a1a; border-top: 1px solid #333;
 padding: 4px 10px; display: flex; gap: 5px; flex-wrap: wrap;
 min-height: 39px; align-items: center; flex-shrink: 0;
 }
-#beat-bar-empty { font-size: 11px; color: #444; width: 100%; text-align: center; }
+#beat-bar-empty { font-size: 11px; color: #bbb; width: 100%; text-align: center; }
 .beat-card {
 flex: 1; min-width: 56px; background: #111; border: 1px solid #2a2a2a;
 border-radius: 5px; padding: 3px 3px; text-align: center; transition: border-color 0.2s;
 }
-.beat-card .bc-h { font-size: 8px; color: #555; }
+.beat-card .bc-h { font-size: 8px; color: #ccc; }
 .beat-card .bc-val { font-size: 14px; font-weight: bold; line-height: 1.1; }
-.beat-card .bc-unit { font-size: 7px; color: #555; }
+.beat-card .bc-unit { font-size: 7px; color: #ccc; }
 .beat-card .bc-dur { font-size: 8px; color: #6a9; margin-top: 1px; }
 
 /* Controls */
@@ -140,9 +140,9 @@ padding: 8px 12px; display: flex; flex-direction: column;
 gap: 8px; flex-shrink: 0;
 }
 .ctrl-row { display: flex; align-items: center; gap: 8px; }
-.ctrl-label { font-size: 11px; color: #666; min-width: 50px; letter-spacing: 0.5px; }
+.ctrl-label { font-size: 11px; color: #ccc; min-width: 50px; letter-spacing: 0.5px; }
 .ctrl-row input[type=range] { flex: 1; accent-color: #3355cc; height: 22px; }
-.ctrl-val { font-size: 11px; color: #888; min-width: 44px; text-align: right; }
+.ctrl-val { font-size: 11px; color: #ddd; min-width: 44px; text-align: right; }
 .ctrl-btn {
 background: #1a1a2a; border: 1px solid #334; border-radius: 5px;
 color: #88aaff; font-size: 11px; padding: 4px 8px;
@@ -161,7 +161,7 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
   <div id="info-bar">
     <div id="note-group">
       <span id="note-big">—</span>
-      <span id="note-sub" style="color:#444">— Hz</span>
+      <span id="note-sub" style="color:#bbb">— Hz</span>
     </div>
     <div id="level-group">
       <span id="level-label">Input Level</span>
@@ -174,11 +174,11 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 <div class="section-label">
   <span>FFT / Spectrogram (H1–H8)</span>
   <div style="display:flex;align-items:center;gap:6px;">
-    <span id="scale-label" style="font-size:10px;color:#666;">LIN</span>
+    <span id="scale-label" style="font-size:10px;color:#ccc;">LIN</span>
     <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
     </div>
-    <span id="sr-label" style="font-size:10px;color:#666;">44100 Hz</span>
+    <span id="sr-label" style="font-size:10px;color:#ccc;">44100 Hz</span>
   </div>
 </div>
 
@@ -193,7 +193,7 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
       <div id="freq-axis"></div>
     </div>
     <div id="db-scale">
-      <div style="font-size:8px;color:#888;text-align:center;padding-top:2px;flex-shrink:0;">0</div>
+      <div style="font-size:8px;color:#ddd;text-align:center;padding-top:2px;flex-shrink:0;">0</div>
       <div id="db-gradient">
         <div class="db-tick" style="top:12%">-12</div>
         <div class="db-tick" style="top:25%">-24</div>
@@ -203,7 +203,7 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
         <div class="db-tick" style="top:75%">-72</div>
         <div class="db-tick" style="top:87%">-84</div>
       </div>
-      <div style="font-size:8px;color:#888;text-align:center;padding-bottom:2px;flex-shrink:0;">-96</div>
+      <div style="font-size:8px;color:#ddd;text-align:center;padding-bottom:2px;flex-shrink:0;">-96</div>
     </div>
   </div>
 </div>
@@ -345,7 +345,7 @@ for (let h = 0; h < NUM_H; h++) {
   card.className = "beat-card";
   card.id = "bcard"+h;
   card.style.display = "none";
-  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#888">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}">— s</div>`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}">— s</div>`;
   beatBarEl.appendChild(card);
   beatCards[h] = card;
 }
@@ -591,7 +591,13 @@ function detectBeat(data, sr, hFreq) {
     const sepBins = sepHz / binSize;
     const lvlDiff = Math.abs(peaks[0].v - peaks[1].v); // dB difference
     if (sepBins >= 4 && lvlDiff <= 10) {
-      return { type:"diff", beat: sepHz, db: Math.max(peaks[0].v, peaks[1].v) };
+      // Determine direction: the peak above the theoretical reference
+      // frequency (hFreq) is taken to be the string being tuned/moved.
+      // If that peak sits above hFreq, the beat is reported as
+      // positive (sharp); if it sits below, negative (flat).
+      const movingPeak = top2[1].f >= hFreq ? top2[1] : top2[0];
+      const sign = movingPeak.f >= hFreq ? 1 : -1;
+      return { type:"diff", beat: sepHz, signedBeat: sign*sepHz, db: Math.max(peaks[0].v, peaks[1].v) };
     }
     // Fall through to amplitude-modulation tracking using the strongest peak
     return { type:"amp", db: peaks[0].v };
@@ -699,7 +705,7 @@ function renderLoop() {
     if (result && result.type==="diff") {
       // Two distinct peaks → direct frequency-difference beat rate
       beatNullCount[h]=0;
-      beatHistory[h].push(result.beat);
+      beatHistory[h].push(result.signedBeat !== undefined ? result.signedBeat : result.beat);
       if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
       // Reset envelope tracking since we're in diff mode now
@@ -826,7 +832,7 @@ function updateFreqAxisLabels() {
       const lbl=document.createElement("div");
       lbl.className="freq-label";
       lbl.style.top=y+"px";
-      lbl.style.color=selH[h]?"rgba(200,255,0,0.95)":"rgba(255,220,100,0.6)";
+      lbl.style.color=selH[h]?"rgba(0,255,85,0.95)":"rgba(255,220,100,0.6)";
       lbl.textContent=`H${h+1} ${hf.toFixed(0)}Hz`;
       freqAxisEl.appendChild(lbl);
     }
@@ -850,7 +856,7 @@ function updateBeatDisplay() {
     valEl.style.color=col;
     valEl.textContent=hist.length===0?"—":(()=>{
       const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
-      return avg<0.005?"0.00":avg.toFixed(2);
+      return Math.abs(avg)<0.005?"0.00":(avg>0?"+":"")+avg.toFixed(2);
     })();
 
     // Duration: while the note is actively sounding, show the live
