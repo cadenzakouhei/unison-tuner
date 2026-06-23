@@ -380,6 +380,10 @@ function initCanvas() {
   lastAxisUpdate  = 0;
   updateFreqAxisLabels();
 }
+// Explicitly (re)assert the default view range before the very first
+// canvas init, in case anything touched viewLo/viewHi before this point.
+viewLo = logScale ? 10 : 0;
+viewHi = 4200;
 requestAnimationFrame(()=>requestAnimationFrame(()=>initCanvas()));
 window.addEventListener("resize", initCanvas);
 
