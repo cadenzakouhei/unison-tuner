@@ -14,7 +14,7 @@ body {
   background: #111; color: #fff;
   font-family: -apple-system, 'Helvetica Neue', sans-serif;
   height: 100dvh; display: flex; flex-direction: column;
-  font-size: 13px; overflow: hidden;
+  font-size: 13px; overflow: hidden; position: relative;
 }
 
 /* Header */
@@ -83,7 +83,21 @@ transition: all 0.15s; user-select: none;
 .hs-btn.selected { background: #1a2a00; border-color: #ccff00; color: #ccff00; }
 
 /* Spectrogram */
-#spectro-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+#spectro-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; position: relative; }
+
+/* Bottom overlay: beat-bar + controls float over the spectrogram’s
+bottom edge instead of squeezing its height when multiple harmonics
+are selected. This keeps H1 (the fundamental, usually lowest on
+screen) always visible. */
+#bottom-overlay {
+position: absolute; left: 0; right: 0; bottom: 0;
+display: flex; flex-direction: column;
+background: rgba(17,17,17,0.94);
+border-top: 1px solid #333;
+z-index: 20;
+max-height: 70%;
+overflow-y: auto;
+}
 #spectro-outer { flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative; }
 #spectro-canvas-wrap {
 flex: 1; position: relative; overflow: hidden; touch-action: none;
@@ -199,22 +213,23 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
       <div style="font-size:8px;color:#888;text-align:center;padding-bottom:2px;flex-shrink:0;">-96</div>
     </div>
   </div>
-</div>
 
-<div class="section-label"><span>Beat Frequency — Selected Harmonics</span></div>
-<div id="beat-bar"><span id="beat-bar-empty">Select a harmonic above to show beat frequency</span></div>
-
-<div id="controls">
-  <div class="ctrl-row">
-    <span class="ctrl-label">GAIN</span>
-    <input type="range" id="sl-gain" min="10" max="90" step="1" value="20">
-    <span class="ctrl-val" id="vl-gain">20 dB</span>
-  </div>
-  <div class="ctrl-row">
-    <span class="ctrl-label">A4 REF</span>
-    <input type="range" id="sl-ref" min="435" max="450" step="0.1" value="442">
-    <span class="ctrl-val" id="vl-ref">442.0 Hz</span>
-    <button id="btn-ref-reset" class="ctrl-btn">442</button>
+  <div id="bottom-overlay">
+    <div class="section-label"><span>Beat Frequency — Selected Harmonics</span></div>
+    <div id="beat-bar"><span id="beat-bar-empty">Select a harmonic above to show beat frequency</span></div>
+    <div id="controls">
+      <div class="ctrl-row">
+        <span class="ctrl-label">GAIN</span>
+        <input type="range" id="sl-gain" min="10" max="90" step="1" value="20">
+        <span class="ctrl-val" id="vl-gain">20 dB</span>
+      </div>
+      <div class="ctrl-row">
+        <span class="ctrl-label">A4 REF</span>
+        <input type="range" id="sl-ref" min="435" max="450" step="0.1" value="442">
+        <span class="ctrl-val" id="vl-ref">442.0 Hz</span>
+        <button id="btn-ref-reset" class="ctrl-btn">442</button>
+      </div>
+    </div>
   </div>
 </div>
 
