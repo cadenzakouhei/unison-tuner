@@ -20,41 +20,43 @@ body {
 /* Header */
 #header {
 background: #1a1a1a; border-bottom: 1px solid #333;
-padding: 8px 12px; display: flex; flex-direction: column;
-gap: 6px; flex-shrink: 0;
+padding: 4px 12px; display: flex; flex-direction: column;
+gap: 3px; flex-shrink: 0;
 }
 #title-row {
 display: flex; align-items: center;
 justify-content: center; position: relative;
 }
-#app-title { font-size: 17px; font-weight: 600; letter-spacing: 1px; color: #fff; }
+#app-title { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: #fff; }
 #mic-btn {
 position: absolute; right: 0;
 background: #2a0808; border: 1.5px solid #882;
-border-radius: 8px; color: #f55; font-size: 13px;
-font-family: -apple-system, sans-serif; padding: 6px 12px;
+border-radius: 7px; color: #f55; font-size: 11px;
+font-family: -apple-system, sans-serif; padding: 3px 10px;
 cursor: pointer; -webkit-appearance: none;
-transition: all 0.15s; min-width: 90px; text-align: center;
+transition: all 0.15s; min-width: 76px; text-align: center;
 }
 #mic-btn.on { background: #0a1a2a; border-color: #2255aa; color: #88aaff; }
 
 #info-bar {
-display: grid; grid-template-columns: 1fr 1fr;
-gap: 8px; align-items: center;
+display: flex; align-items: center; gap: 14px;
+padding: 2px 2px;
 }
-.info-box {
-background: #222; border: 1px solid #333;
-border-radius: 6px; padding: 5px 8px;
+#note-group {
+display: flex; align-items: baseline; gap: 6px; flex-shrink: 0;
 }
-.info-box .ib-label { font-size: 10px; color: #888; margin-bottom: 2px; }
-#note-big { font-size: 28px; font-weight: bold; color: #fff; line-height: 1; }
-#note-sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+#note-big { font-size: 17px; font-weight: bold; color: #fff; line-height: 1; flex-shrink: 0; }
+#note-sub { font-size: 10px; color: #888; flex-shrink: 0; }
+#level-group {
+flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+#level-label { font-size: 10px; color: #888; flex-shrink: 0; }
+#level-db { font-size: 10px; color: #888; flex-shrink: 0; }
 #level-bar-wrap {
-height: 14px; background: #000; border-radius: 3px;
-overflow: hidden; margin: 3px 0; border: 1px solid #333;
+flex: 1; height: 8px; background: #000; border-radius: 3px;
+overflow: hidden; border: 1px solid #333; min-width: 0;
 }
 #level-bar { height: 100%; width: 0%; background: linear-gradient(to right, #0c0, #aa0, #c00); transition: width 0.05s; }
-#level-db { font-size: 11px; color: #aaa; text-align: right; }
 
 /* Section label */
 .section-label {
@@ -150,15 +152,14 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
     <button id="mic-btn">🔇 MIC OFF</button>
   </div>
   <div id="info-bar">
-    <div class="info-box">
-      <div class="ib-label">Detected Note</div>
-      <div id="note-big">—</div>
-      <div id="note-sub" style="color:#444">— Hz</div>
+    <div id="note-group">
+      <span id="note-big">—</span>
+      <span id="note-sub" style="color:#444">— Hz</span>
     </div>
-    <div class="info-box">
-      <div class="ib-label">Input Level</div>
+    <div id="level-group">
+      <span id="level-label">Input Level</span>
+      <span id="level-db">— dB</span>
       <div id="level-bar-wrap"><div id="level-bar"></div></div>
-      <div id="level-db">— dB</div>
     </div>
   </div>
 </div>
