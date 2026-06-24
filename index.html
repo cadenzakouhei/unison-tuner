@@ -270,6 +270,7 @@ let viewHi       = 4200; // default range matches reference app
 let ampEnv       = Array.from({length:NUM_H}, ()=>[]); // recent [{t, db}] samples
 let lastPeakTime = new Array(NUM_H).fill(null);  // timestamp of most recent confirmed peak
 let lastBeatRate = new Array(NUM_H).fill(null);  // last computed beat/s
+let lastTroughDb = new Array(NUM_H).fill(null);  // dB value at the most recent local minimum of the envelope
 let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
 let noteDuration = new Array(NUM_H).fill(null);  // seconds from onset to the note dying out (held until next note starts)
@@ -632,6 +633,14 @@ function detectBeat(data, sr, hFreq) {
 // minimum gap between confirmed peaks corresponding to a realistic
 // upper bound on piano beat rates (~10 Hz → 100ms) so that residual
 // noise wiggles can't be double-counted as separate beats.
+//
+// Crucially, a perfectly in-tune unison still has small natural
+// amplitude fluctuation (attack transients, slight inharmonicity,
+// bow/hammer noise) even though there is truly no beating. To avoid
+// reporting a false beat rate in that case, we require the swing
+// between the most recent local max and local min to exceed
+// MIN_BEAT_SWING_DB before counting it as a genuine beat peak.
+const MIN_BEAT_SWING_DB = 4; // dB — minimum envelope peak-to-trough swing to count as a real beat
 function smoothedDb(env, idx, halfWin) {
   const s = Math.max(0, idx-halfWin), e = Math.min(env.length-1, idx+halfWin);
   let sum=0, cnt=0;
@@ -639,20 +648,39 @@ function smoothedDb(env, idx, halfWin) {
   return sum/cnt;
 }
 
-function detectEnvelopePeak(env, prevPeakTime) {
+function detectEnvelopePeak(env, prevPeakTime, lastTroughDb) {
   const n = env.length;
   const halfWin = 7; // ~15-sample smoothing window
-  if (n < halfWin*2+5) return null; // need enough samples for full smoothing on both sides
-  const idx = n - halfWin - 2; // leave room for halfWin neighbours on the right
+  if (n < halfWin*2+5) return null;
+  const idx = n - halfWin - 2;
   const aS = smoothedDb(env, idx-1, halfWin);
   const bS = smoothedDb(env, idx,   halfWin);
   const cS = smoothedDb(env, idx+1, halfWin);
   if (bS >= aS && bS >= cS && bS > aS) {
+    // Require a genuine swing in amplitude (not just noise-level jitter)
+    // relative to the most recent local minimum we've seen.
+    if (lastTroughDb !== null && (bS - lastTroughDb) < MIN_BEAT_SWING_DB) {
+      return null;
+    }
     const peakTime = env[idx].t;
     if (prevPeakTime === null || (peakTime - prevPeakTime) >= PEAK_MIN_GAP_MS) {
       return peakTime;
     }
   }
+  return null;
+}
+
+// Detects a local minimum in the smoothed envelope, used purely to
+// track the "floor" of the current swing for MIN_BEAT_SWING_DB checks.
+function detectEnvelopeTrough(env) {
+  const n = env.length;
+  const halfWin = 7;
+  if (n < halfWin*2+5) return null;
+  const idx = n - halfWin - 2;
+  const aS = smoothedDb(env, idx-1, halfWin);
+  const bS = smoothedDb(env, idx,   halfWin);
+  const cS = smoothedDb(env, idx+1, halfWin);
+  if (bS <= aS && bS <= cS && bS < aS) return bS;
   return null;
 }
 
@@ -674,7 +702,19 @@ function renderLoop() {
   for (let i=0;i<fftData.length;i++) if(fftData[i]>peak) peak=fftData[i];
   updateLevel(peak);
   const freq=detectPitch(fftData,sr);
-  if (freq) { currentFreq=freq; updateNoteDisplay(freq); }
+  if (freq) {
+    // Smooth currentFreq so the H1–H8 guide lines / labels don't jitter
+    // frame-to-frame from small pitch-detection noise. If the new
+    // reading is far from the previous smoothed value (i.e. a genuinely
+    // new note, not just noise on the same note), snap immediately
+    // instead of easing in, so note changes still feel responsive.
+    if (currentFreq===null || Math.abs(freq-currentFreq)/currentFreq > 0.03) {
+      currentFreq = freq;
+    } else {
+      currentFreq = currentFreq + (freq-currentFreq)*0.25;
+    }
+    updateNoteDisplay(freq);
+  }
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
   for (let h=0;h<NUM_H;h++) {
@@ -722,7 +762,7 @@ function renderLoop() {
       if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
       // Reset envelope tracking since we're in diff mode now
-      ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0;
+      ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null;
     } else if (result && result.type==="amp" && selH[h]) {
       // Single peak in frequency domain → this harmonic is "beating"
       // in amplitude over time. Track its envelope and measure the
@@ -734,7 +774,10 @@ function renderLoop() {
       ampEnv[h].push({t:now, db:result.db});
       while (ampEnv[h].length && now - ampEnv[h][0].t > ENV_KEEP_MS) ampEnv[h].shift();
 
-      const peakT = detectEnvelopePeak(ampEnv[h], lastPeakTime[h]);
+      const trough = detectEnvelopeTrough(ampEnv[h]);
+      if (trough !== null) lastTroughDb[h] = trough;
+
+      const peakT = detectEnvelopePeak(ampEnv[h], lastPeakTime[h], lastTroughDb[h]);
       if (peakT !== null) {
         if (lastPeakTime[h] !== null) {
           const periodMs = peakT - lastPeakTime[h];
@@ -770,7 +813,7 @@ function renderLoop() {
       ampNullCount[h]++;
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
         beatHistory[h]=[]; statusVals[h]=0;
-        ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null;
+        ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null; lastTroughDb[h]=null;
       }
     }
   }
@@ -911,18 +954,27 @@ function toggleH(h) {
   requestAnimationFrame(()=>requestAnimationFrame(()=>initCanvas()));
 }
 
+let displayFreqSmoothed = null;
 function updateNoteDisplay(freq) {
-  const note=freqToNote(freq);
   const nb=document.getElementById("note-big");
   const ns=document.getElementById("note-sub");
-  if (note) {
-    nb.textContent=note.name; nb.style.color="#fff";
-    ns.textContent=`${freq.toFixed(2)} Hz  ${note.cents>=0?"+":""}${note.cents.toFixed(1)}¢`;
-    ns.style.color="#aaa";
+  if (freq) {
+    // Smooth the displayed frequency so the cents readout doesn't
+    // flicker every frame — exponential moving average, ~0.15 weight
+    // per frame gives a comfortably readable update pace.
+    displayFreqSmoothed = (displayFreqSmoothed===null) ? freq : displayFreqSmoothed + (freq - displayFreqSmoothed)*0.15;
+    const note=freqToNote(displayFreqSmoothed);
+    if (note) {
+      nb.textContent=note.name; nb.style.color="#fff";
+      ns.textContent=`${displayFreqSmoothed.toFixed(2)} Hz  ${note.cents>=0?"+":""}${note.cents.toFixed(1)}¢`;
+      ns.style.color="#aaa";
+      return;
+    }
   } else {
-    nb.textContent="—"; nb.style.color="#444";
-    ns.textContent="— Hz"; ns.style.color="#444";
+    displayFreqSmoothed = null;
   }
+  nb.textContent="—"; nb.style.color="#444";
+  ns.textContent="— Hz"; ns.style.color="#444";
 }
 
 function updateLevel(db) {
@@ -935,7 +987,7 @@ function resetState() {
   currentFreq=null; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
-  noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false);
+  noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
   viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
 }
