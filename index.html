@@ -588,7 +588,7 @@ function detectBeat(data, sr, hFreq) {
   const s=Math.max(1,cBin-wBins), e=Math.min(data.length-2,cBin+wBins);
   const peaks=[];
   for (let i=s;i<=e;i++) {
-    if (data[i]>data[i-1]&&data[i]>data[i+1]&&data[i]>-88)
+    if (data[i]>data[i-1]&&data[i]>data[i+1]&&data[i]>-95)
       peaks.push({f:i*binSize,v:data[i]});
   }
   peaks.sort((a,b)=>b.v-a.v);
