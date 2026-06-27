@@ -282,7 +282,7 @@ const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together 
 const ONSET_DB_THRESHOLD = -30; // must reach at least this loud to be considered "sounding" (start)
 const STOP_DB_THRESHOLD  = -80; // must drop below this to be considered "silent" (stop) — hysteresis to avoid re-triggering on small noise
 
-let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, rafId=null;
+let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let offCanvas=null, offCtx=null;
 let lastAxisUpdate = 0;
 let blackmanWin = null;
@@ -291,7 +291,11 @@ let blackmanWin = null;
 // Reference: background=cyan(-60dB), signal=yellow-red(-40~0dB)
 function dbToRGB(db) {
   const boosted = db + spectroGain;
-  const t = Math.max(0, Math.min(1, (boosted + 96) / 96));
+  let t = Math.max(0, Math.min(1, (boosted + 96) / 96));
+  // ガンマ補正: ノイズフロア付近(低t)を暗い青/黒側へさらに圧縮し、
+  // 真のピーク(高t)はほぼそのまま保つ。これにより参考アプリのような
+  // 「無地で暗い背景＋くっきり濃い帯」のコントラストになる。
+  t = Math.pow(t, 1.6);
   // 0.00-0.20: black → dark blue
   // 0.20-0.40: dark blue → blue → cyan  ← noise floor
   // 0.40-0.55: cyan → yellow-green
@@ -525,6 +529,7 @@ async function startMic() {
     analyser.fftSize = FFT_SIZE;
     analyser.smoothingTimeConstant = 0.5;
     fftData  = new Float32Array(analyser.frequencyBinCount);
+    timeData = new Float32Array(analyser.fftSize); // raw time-domain samples, used by Goertzel pitch refinement
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
     // Precompute Blackman window
@@ -557,8 +562,49 @@ document.addEventListener("visibilitychange", ()=>{
   if (!document.hidden && audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
 });
 
-// ── Pitch detection (HPS) ──────────────────────────────────
-function detectPitch(data, sr) {
+// ── Goertzel: 任意周波数での振幅を直接計算（ゼロパディングFFT相当の精度）──
+// HPSで求めた粗い周波数推定値の近傍を、binという離散グリッドに縛られず
+// 任意の実数周波数で直接評価できる。低音域(C2など)でbin幅が粗いとき
+// パラボリック補間だけでは精度が不足するため、これで追い込む。
+function goertzelMag(samples, win, freq, sr) {
+  const N = samples.length;
+  const k = freq * N / sr; // 整数binである必要はない
+  const w = 2 * Math.PI * k / N;
+  const cosine = Math.cos(w), sine = Math.sin(w), coeff = 2 * cosine;
+  let s0 = 0, s1 = 0, s2 = 0;
+  for (let i = 0; i < N; i++) {
+    s0 = samples[i] * win[i] + coeff * s1 - s2;
+    s2 = s1; s1 = s0;
+  }
+  const real = s1 - s2 * cosine;
+  const imag = s2 * sine;
+  return Math.sqrt(real * real + imag * imag);
+}
+
+// 黄金分割探索でHPS推定値の±1bin範囲内の真のピークを追い込む
+function refineFreqGoertzel(samples, win, sr, freqGuess, binSize) {
+  let lo = freqGuess - binSize, hi = freqGuess + binSize;
+  const gr = (Math.sqrt(5) - 1) / 2;
+  let c = hi - gr * (hi - lo);
+  let d = lo + gr * (hi - lo);
+  let fc = goertzelMag(samples, win, c, sr);
+  let fd = goertzelMag(samples, win, d, sr);
+  for (let iter = 0; iter < 16; iter++) {
+    if (fc > fd) {
+      hi = d; d = c; fd = fc;
+      c = hi - gr * (hi - lo);
+      fc = goertzelMag(samples, win, c, sr);
+    } else {
+      lo = c; c = d; fc = fd;
+      d = lo + gr * (hi - lo);
+      fd = goertzelMag(samples, win, d, sr);
+    }
+  }
+  return (lo + hi) / 2;
+}
+
+// ── Pitch detection (HPS + オクターブ補正 + Goertzel精密化) ──
+function detectPitch(data, sr, timeSamples) {
   const binSize = sr / FFT_SIZE;
   const lo = Math.floor(27.5/binSize);
   const hi = Math.min(Math.floor(2000/binSize), data.length-1);
@@ -570,13 +616,39 @@ function detectPitch(data, sr) {
               *lin[Math.min(i*4,data.length-1)]*lin[Math.min(i*5,data.length-1)];
     if (v>maxVal) { maxVal=v; maxBin=i; }
   }
-  if (data[maxBin]<-72) return null;
+  if (maxBin===0 || data[maxBin]<-72) return null;
+
+  // --- オクターブ/倍音ロック補正 ---
+  // 低音では基音binのエネルギーが弱く、強い倍音位置がHPSで
+  // 誤って「基音」と判定されることがある(例: C2弾いてG3=3倍音と
+  // 誤検出)。maxBinの約数(÷6..÷2)に独立した調和列(自分自身の倍音群)
+  // が存在するか確認し、見つかった最も低い候補を正しい基音として
+  // 採用する。
+  for (let k=6; k>=2; k--) {
+    const subBin = Math.round(maxBin/k);
+    if (subBin < lo) continue;
+    if (data[subBin] < -72) continue; // 基音bin自体にエネルギーが必要
+    let coherent=0, total=0;
+    for (let m=1; m*subBin<=hi && m<=8; m++) {
+      total++;
+      if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
+    }
+    if (total>0 && coherent/total >= 0.6) { maxBin = subBin; break; }
+  }
+
+  // 粗い推定値（パラボリック補間）
   const prev=maxBin>0?lin[maxBin-1]:lin[maxBin];
   const cur =lin[maxBin];
   const next=maxBin<data.length-1?lin[maxBin+1]:lin[maxBin];
   const denom=prev-2*cur+next;
   const delta=Math.abs(denom)>1e-10?0.5*(prev-next)/denom:0;
-  return (maxBin+Math.max(-0.5,Math.min(0.5,delta)))*binSize;
+  const coarseFreq = (maxBin+Math.max(-0.5,Math.min(0.5,delta)))*binSize;
+
+  // Goertzelで±1bin内を高精度再探索(特に低音で効果大)
+  if (timeSamples && blackmanWin) {
+    return refineFreqGoertzel(timeSamples, blackmanWin, sr, coarseFreq, binSize);
+  }
+  return coarseFreq;
 }
 
 function detectBeat(data, sr, hFreq) {
@@ -698,10 +770,11 @@ function renderLoop() {
   if (!analyser||!fftData) return;
   const sr=audioCtx?.sampleRate||44100;
   analyser.getFloatFrequencyData(fftData);
+  analyser.getFloatTimeDomainData(timeData);
   let peak=-Infinity;
   for (let i=0;i<fftData.length;i++) if(fftData[i]>peak) peak=fftData[i];
   updateLevel(peak);
-  const freq=detectPitch(fftData,sr);
+  const freq=detectPitch(fftData,sr,timeData);
   if (freq) {
     // Smooth currentFreq so the H1–H8 guide lines / labels don't jitter
     // frame-to-frame from small pitch-detection noise. If the new
@@ -823,6 +896,31 @@ function renderLoop() {
 }
 
 // ── Spectrogram ────────────────────────────────────────────
+// ── 表示用の周波数方向スムージング ─────────────────────────
+// 生のFFTビンをそのまま1ピクセル行に対応させると、ビン幅が画面の
+// ピクセル密度より細かい場合に線が1〜2pxしかない細い表示になる。
+// リニア(振幅)領域で複数ビンにわたる重み付き移動平均をかけることで、
+// ピーク自体の高さはほぼ保ったまま、視覚的な帯の太さを参考アプリ
+// 相当(数px〜十数px)に広げる。dB領域で平均すると弱い側に引っ張られて
+// ピークが鈍るため、必ずリニア領域で計算してからdBに戻す。
+const SMOOTH_RADIUS = 4; // ±4 bin (9-tap)
+function smoothFreqDataForDisplay(data) {
+  const n = data.length;
+  const out = new Float32Array(n);
+  for (let i=0; i<n; i++) {
+    let sum=0, wsum=0;
+    const s=Math.max(0,i-SMOOTH_RADIUS), e=Math.min(n-1,i+SMOOTH_RADIUS);
+    for (let j=s; j<=e; j++) {
+      const w = 1 - Math.abs(j-i)/(SMOOTH_RADIUS+1);
+      sum += Math.pow(10, data[j]/20) * w;
+      wsum += w;
+    }
+    const avgLin = wsum>0 ? sum/wsum : 1e-12;
+    out[i] = 20*Math.log10(Math.max(avgLin, 1e-12));
+  }
+  return out;
+}
+
 function drawSpectroColumn(binSize) {
   if (!offCanvas||!offCtx) return;
   const W=offCanvas.width, H=offCanvas.height;
@@ -832,13 +930,14 @@ function drawSpectroColumn(binSize) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
+  const disp = smoothFreqDataForDisplay(fftData); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const bin=Math.round(freq/binSize);
-    const db=(bin>=0&&bin<fftData.length)?fftData[bin]:-120;
-    const dbP1=(bin+1<fftData.length)?fftData[bin+1]:-120;
-    const dbM1=(bin-1>=0)?fftData[bin-1]:-120;
-    const dbMax=Math.max(db,dbP1*0.85,dbM1*0.85);
+    const db=(bin>=0&&bin<disp.length)?disp[bin]:-120;
+    const dbP1=(bin+1<disp.length)?disp[bin+1]:-120;
+    const dbM1=(bin-1>=0)?disp[bin-1]:-120;
+    const dbMax=Math.max(db,dbP1*0.9,dbM1*0.9);
     const [r,g,b]=dbToRGB(dbMax);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
