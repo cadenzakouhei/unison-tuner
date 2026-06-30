@@ -186,6 +186,10 @@ cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
 <div class="section-label">
   <span>FFT / Spectrogram (H1–H8)</span>
   <div style="display:flex;align-items:center;gap:6px;">
+    <span id="tags-label" style="font-size:10px;color:#ccc;">TAGS</span>
+    <div id="tags-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+      <div id="tags-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
+    </div>
     <span id="scale-label" style="font-size:10px;color:#ccc;">LIN</span>
     <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
@@ -255,6 +259,7 @@ let gainVal      = 5.0;
 let spectroGain  = 20;  // match reference app 20.3dB
 let refPitch     = 442.0;
 let logScale     = false; // default linear like reference app
+let showTags     = true;  // whether H1–H8 harmonic frequency tags are drawn on the spectrogram
 let selH         = new Array(NUM_H).fill(false);
 let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
 let beatNullCount= new Array(NUM_H).fill(0);
@@ -990,7 +995,7 @@ function updateFreqAxisLabels() {
   });
 
   // In-graph harmonic labels, kept inside the spectrogram area.
-  if (currentFreq) {
+  if (showTags && currentFreq) {
     for (let h=0;h<NUM_H;h++) {
       const hf=currentFreq*(h+1);
       if (hf<=viewLo||hf>=viewHi) continue;
@@ -1104,6 +1109,12 @@ document.getElementById("btn-ref-reset").addEventListener("click", function() {
   refPitch=442.0;
   document.getElementById("sl-ref").value=442.0;
   document.getElementById("vl-ref").textContent="442.0 Hz";
+});
+document.getElementById("tags-toggle").addEventListener("click", function() {
+  showTags=!showTags;
+  this.style.background=showTags?"#446622":"#333";
+  document.getElementById("tags-knob").style.left=showTags?"18px":"2px";
+  lastAxisUpdate=0; updateFreqAxisLabels();
 });
 document.getElementById("scale-toggle").addEventListener("click", function() {
   logScale=!logScale;
