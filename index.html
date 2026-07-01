@@ -265,6 +265,8 @@ let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
 let beatNullCount= new Array(NUM_H).fill(0);
 let statusVals   = new Array(NUM_H).fill(0);
 let currentFreq  = null;
+let pendingFreq  = null; // candidate new pitch awaiting confirmation across several frames
+let pendingCount = 0;    // how many consecutive frames have agreed with pendingFreq
 let viewLo       = 0;
 let viewHi       = 4200; // default range matches reference app
 
@@ -626,20 +628,30 @@ function detectPitch(data, sr, timeSamples) {
   // --- オクターブ/倍音ロック補正 ---
   // 低音では基音binのエネルギーが弱く、強い倍音位置がHPSで
   // 誤って「基音」と判定されることがある(例: C2弾いてG3=3倍音と
-  // 誤検出)。maxBinの約数(÷6..÷2)に独立した調和列(自分自身の倍音群)
-  // が存在するか確認し、見つかった最も低い候補を正しい基音として
-  // 採用する。
-  for (let k=6; k>=2; k--) {
+  // 誤検出)。ただし判定が緩すぎると逆に、ノイズフロアの揺らぎを
+  // 「基音候補」と誤認して不必要に低い方へシフトしてしまう
+  // (例: 68Hzの音を34Hzに誤補正)。そのため:
+  //  - 候補は k=2 (最も可能性が高い半分の位置) から先に試す
+  //  - ノイズフロアではなく maxBin 自体の強さを基準に、
+  //    十分近い強度を持つ場合のみ「独立した基音」とみなす
+  //  - 最低4本の倍音が観測できる場合のみ判定（統計的信頼性の確保）
+  //  - 一致率のしきい値を厳しくする (0.6 → 0.85)
+  const maxBinDb = data[maxBin];
+  let correctedBin = maxBin;
+  for (let k=2; k<=6; k++) {
     const subBin = Math.round(maxBin/k);
     if (subBin < lo) continue;
-    if (data[subBin] < -72) continue; // 基音bin自体にエネルギーが必要
+    // 候補の基音binが、検出された最強ピークと比べて明らかに弱い場合は
+    // 対象外（ノイズやサイドローブの可能性が高い）。
+    if (data[subBin] < maxBinDb - 20) continue;
     let coherent=0, total=0;
     for (let m=1; m*subBin<=hi && m<=8; m++) {
       total++;
       if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
     }
-    if (total>0 && coherent/total >= 0.6) { maxBin = subBin; break; }
+    if (total>=4 && coherent/total >= 0.85) { correctedBin = subBin; break; }
   }
+  maxBin = correctedBin;
 
   // 粗い推定値（パラボリック補間）
   const prev=maxBin>0?lin[maxBin-1]:lin[maxBin];
@@ -782,16 +794,31 @@ function renderLoop() {
   const freq=detectPitch(fftData,sr,timeData);
   if (freq) {
     // Smooth currentFreq so the H1–H8 guide lines / labels don't jitter
-    // frame-to-frame from small pitch-detection noise. If the new
-    // reading is far from the previous smoothed value (i.e. a genuinely
-    // new note, not just noise on the same note), snap immediately
-    // instead of easing in, so note changes still feel responsive.
-    if (currentFreq===null || Math.abs(freq-currentFreq)/currentFreq > 0.03) {
+    // frame-to-frame from small pitch-detection noise. A single
+    // outlier frame (e.g. a stray octave misdetection) must not be
+    // able to snap the display to a new note — we require several
+    // consecutive frames agreeing on a new pitch before treating it
+    // as a genuine note change. Otherwise we ease toward it slowly.
+    if (currentFreq===null) {
       currentFreq = freq;
+      pendingFreq = null; pendingCount = 0;
+    } else if (Math.abs(freq-currentFreq)/currentFreq > 0.03) {
+      // Candidate "new note" — only accept after it repeats consistently.
+      if (pendingFreq !== null && Math.abs(freq-pendingFreq)/pendingFreq < 0.01) {
+        pendingCount++;
+      } else {
+        pendingFreq = freq; pendingCount = 1;
+      }
+      if (pendingCount >= 4) {
+        currentFreq = freq;
+        pendingFreq = null; pendingCount = 0;
+      }
+      // While unconfirmed, keep showing the previous stable pitch.
     } else {
-      currentFreq = currentFreq + (freq-currentFreq)*0.25;
+      currentFreq = currentFreq + (freq-currentFreq)*0.12;
+      pendingFreq = null; pendingCount = 0;
     }
-    updateNoteDisplay(freq);
+    updateNoteDisplay(currentFreq);
   }
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
@@ -1066,7 +1093,7 @@ function updateNoteDisplay(freq) {
     // Smooth the displayed frequency so the cents readout doesn't
     // flicker every frame — exponential moving average, ~0.15 weight
     // per frame gives a comfortably readable update pace.
-    displayFreqSmoothed = (displayFreqSmoothed===null) ? freq : displayFreqSmoothed + (freq - displayFreqSmoothed)*0.15;
+    displayFreqSmoothed = (displayFreqSmoothed===null) ? freq : displayFreqSmoothed + (freq - displayFreqSmoothed)*0.2;
     const note=freqToNote(displayFreqSmoothed);
     if (note) {
       nb.textContent=note.name; nb.style.color="#fff";
@@ -1088,7 +1115,7 @@ function updateLevel(db) {
 }
 
 function resetState() {
-  currentFreq=null; statusVals=new Array(NUM_H).fill(0);
+  currentFreq=null; pendingFreq=null; pendingCount=0; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
