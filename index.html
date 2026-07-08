@@ -158,10 +158,11 @@ gap: 8px; flex-shrink: 0;
 background: #1a1a2a; border: 1px solid #334; border-radius: 5px;
 color: #88aaff; font-size: 11px; padding: 4px 8px;
 cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
+touch-action: manipulation;
 }
 .ctrl-btn-wide {
 min-width: 44px; padding: 6px 10px; font-size: 18px; font-weight: bold;
-line-height: 1;
+line-height: 1; touch-action: manipulation;
 }
 .toggle-switch {
 width: 36px; height: 20px; border-radius: 10px; background: #333;
@@ -317,7 +318,7 @@ let noteOnsetTime= new Array(NUM_H).fill(null);  // performance.now() timestamp 
 let hysteresisOn = new Array(NUM_H).fill(false); // latch: true once loud enough to start (sustain mode only)
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
-const ONSET_DB_THRESHOLD = -10; // must reach at least this loud to be considered "sounding" (sustain start)
+const ONSET_DB_THRESHOLD = -40; // must reach at least this loud to be considered "sounding" (sustain start)
 const STOP_DB_THRESHOLD  = -75; // reference floor value (manual Stop button is the actual trigger in sustain mode)
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
@@ -1165,6 +1166,15 @@ document.getElementById("btn-ref-up").addEventListener("click", function() {
 });
 document.getElementById("btn-ref-reset").addEventListener("click", function() {
   setRefPitch(REF_PITCH_DEFAULT);
+});
+
+// iOS Safari can interpret rapid successive taps on the ±/reset pitch
+// buttons as a double-tap-to-zoom gesture even with user-scalable=no
+// in the viewport meta tag. Explicitly swallow touchend on these
+// buttons so no zoom gesture is ever recognized, regardless of tap speed.
+["btn-ref-down","btn-ref-up","btn-ref-reset"].forEach(id=>{
+  const el = document.getElementById(id);
+  el.addEventListener("touchend", function(e){ e.preventDefault(); }, {passive:false});
 });
 
 document.getElementById("tags-toggle").addEventListener("click", function() {
