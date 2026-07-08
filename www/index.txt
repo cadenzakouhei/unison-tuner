@@ -1,0 +1,35 @@
+UNISON ANALYZER
+🔇 MIC OFF
+—
+— Hz
+Input Level
+— dB
+
+FFT / Spectrogram (H1–H8)
+TAGS
+
+LIN
+
+44100 Hz
+Select:
+
+
+
+0
+-12
+-24
+-36
+-48
+-60
+-72
+-84
+-96
+Beat Frequency — Selected Harmonics
+Select a harmonic above to show beat frequency
+GAIN
+
+20 dB
+A4 REF
+
+442.0 Hz
+442
