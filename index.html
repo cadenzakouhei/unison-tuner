@@ -601,6 +601,23 @@ document.addEventListener("visibilitychange", ()=>{
   if (!document.hidden && audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
 });
 
+// ── Prevent double-tap-to-zoom across the whole app ────────
+// viewport's user-scalable=no is not always honored by iOS Safari for
+// the double-tap gesture specifically (as opposed to pinch), so this
+// is enforced explicitly: if two touchend events land within 300ms of
+// each other anywhere in the document, the second one is swallowed.
+let lastTouchEndTime = 0;
+document.addEventListener("touchend", function(e) {
+  const now = Date.now();
+  if (now - lastTouchEndTime <= 300) {
+    e.preventDefault();
+  }
+  lastTouchEndTime = now;
+}, {passive:false});
+// Also block pinch-style gesture zoom (gesturestart fires on iOS Safari
+// even with user-scalable=no in some versions/webview contexts).
+document.addEventListener("gesturestart", function(e) { e.preventDefault(); }, {passive:false});
+
 // ── Goertzel: 任意周波数での振幅を直接計算（ゼロパディングFFT相当の精度）──
 // HPSで求めた粗い周波数推定値の近傍を、binという離散グリッドに縛られず
 // 任意の実数周波数で直接評価できる。低音域(C2など)でbin幅が粗いとき
@@ -1158,15 +1175,51 @@ function setRefPitch(v) {
   refPitch = Math.round(clamped * 10) / 10;
   document.getElementById("vl-ref").textContent = refPitch.toFixed(1)+" Hz";
 }
-document.getElementById("btn-ref-down").addEventListener("click", function() {
-  setRefPitch(refPitch - REF_PITCH_STEP);
-});
-document.getElementById("btn-ref-up").addEventListener("click", function() {
-  setRefPitch(refPitch + REF_PITCH_STEP);
-});
 document.getElementById("btn-ref-reset").addEventListener("click", function() {
   setRefPitch(REF_PITCH_DEFAULT);
 });
+
+// Press-and-hold on the ± pitch buttons: after a short delay, repeat
+// the step continuously, accelerating (shorter interval) the longer
+// the button stays held, so large adjustments don't require dozens of
+// individual taps.
+function attachHoldRepeat(btnId, stepFn) {
+  const el = document.getElementById(btnId);
+  let holdTimeout = null, repeatInterval = null, intervalMs = 0;
+  const INITIAL_DELAY = 400;   // ms before repeat kicks in after initial tap
+  const START_INTERVAL = 180;  // ms between repeats at the start
+  const MIN_INTERVAL = 40;     // fastest repeat rate once fully accelerated
+  const ACCEL = 0.85;          // multiply interval by this each repeat until MIN_INTERVAL
+
+  function clearTimers() {
+    if (holdTimeout) { clearTimeout(holdTimeout); holdTimeout=null; }
+    if (repeatInterval) { clearTimeout(repeatInterval); repeatInterval=null; }
+  }
+  function scheduleNext() {
+    intervalMs = Math.max(MIN_INTERVAL, intervalMs*ACCEL);
+    repeatInterval = setTimeout(()=>{ stepFn(); scheduleNext(); }, intervalMs);
+  }
+  function start(e) {
+    e.preventDefault();
+    clearTimers();
+    stepFn(); // immediate first step on press
+    intervalMs = START_INTERVAL;
+    holdTimeout = setTimeout(()=>{ stepFn(); scheduleNext(); }, INITIAL_DELAY);
+  }
+  function stop(e) {
+    if (e) e.preventDefault();
+    clearTimers();
+  }
+  el.addEventListener("touchstart", start, {passive:false});
+  el.addEventListener("touchend", stop, {passive:false});
+  el.addEventListener("touchcancel", stop, {passive:false});
+  // Mouse fallback (desktop browser testing via GitHub Pages)
+  el.addEventListener("mousedown", start);
+  el.addEventListener("mouseup", stop);
+  el.addEventListener("mouseleave", stop);
+}
+attachHoldRepeat("btn-ref-down", ()=>setRefPitch(refPitch - REF_PITCH_STEP));
+attachHoldRepeat("btn-ref-up",   ()=>setRefPitch(refPitch + REF_PITCH_STEP));
 
 // iOS Safari can interpret rapid successive taps on the ±/reset pitch
 // buttons as a double-tap-to-zoom gesture even with user-scalable=no
