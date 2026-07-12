@@ -366,6 +366,12 @@ const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detec
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 const ONSET_DB_THRESHOLD = -40; // must reach at least this loud to be considered "sounding" (sustain start)
 const STOP_DB_THRESHOLD  = -75; // reference floor value (manual Stop button is the actual trigger in sustain mode)
+// Timeline view uses its own, much more permissive thresholds — it's meant
+// to visualize even very quiet trailing harmonics, not just loud playing,
+// so it picks up signal from right near the analysis noise floor (-97dB)
+// rather than requiring the -40dB used for the Sustain duration counter.
+const TIMELINE_ONSET_DB = -97;
+const TIMELINE_STOP_DB  = -98;
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let offCanvas=null, offCtx=null;
@@ -984,8 +990,8 @@ function renderLoop() {
     } else {
       timelineDbHeld[h] = Math.max(-96, timelineDbHeld[h] - TIMELINE_RELEASE_DB_PER_FRAME);
     }
-    if (timelineDbHeld[h] >= ONSET_DB_THRESHOLD) timelineOn[h] = true;
-    else if (timelineDbHeld[h] < STOP_DB_THRESHOLD) timelineOn[h] = false;
+    if (timelineDbHeld[h] >= TIMELINE_ONSET_DB) timelineOn[h] = true;
+    else if (timelineDbHeld[h] < TIMELINE_STOP_DB) timelineOn[h] = false;
     // else: held level sits between the thresholds — keep whatever
     // on/off state it already had, avoiding flicker right at the edge.
 
@@ -1188,7 +1194,12 @@ function updateFreqAxisLabels() {
   lastAxisUpdate=now;
   freqAxisEl.innerHTML="";
   freqRulerEl.innerHTML="";
-  const H=spectroCanvas.clientHeight||300;
+  // Use whichever canvas is actually visible for the height reference —
+  // the hidden one reports clientHeight 0, which previously caused the
+  // timeline ruler labels to be positioned against a stale/wrong height
+  // (spectroCanvas's, even while it was display:none) and drift out of
+  // alignment with the lanes actually drawn on timelineCanvas.
+  const H=(viewMode==='timeline' ? timelineCanvas.clientHeight : spectroCanvas.clientHeight)||300;
   if (H<10) return;
   const LABEL_MARGIN = 9; // half label height, roughly — keeps labels from clipping at the edges
 
