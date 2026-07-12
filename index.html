@@ -114,6 +114,7 @@ background: #555; transform: translateY(-50%);
 flex: 1; position: relative; overflow: hidden; touch-action: none;
 }
 #spectro-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#timeline-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 #freq-axis { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 .freq-label {
 position: absolute; left: 4px; font-size: 11px; font-weight: 600;
@@ -226,6 +227,10 @@ color: #ff8888; font-weight: bold;
     <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
     </div>
+    <span id="view-label" style="font-size:10px;color:#ccc;">SPEC</span>
+    <div id="view-toggle" class="toggle-switch">
+      <div id="view-knob" class="toggle-knob"></div>
+    </div>
     <span id="sr-label" style="font-size:10px;color:#ccc;">44100 Hz</span>
   </div>
 </div>
@@ -239,6 +244,7 @@ color: #ff8888; font-weight: bold;
     <div id="freq-ruler"></div>
     <div id="spectro-canvas-wrap">
       <canvas id="spectro-canvas"></canvas>
+      <canvas id="timeline-canvas" style="display:none;"></canvas>
       <div id="freq-axis"></div>
     </div>
     <div id="db-scale">
@@ -321,6 +327,7 @@ let spectroGain  = 20;  // match reference app 20.3dB
 let refPitch     = REF_PITCH_DEFAULT;
 let logScale     = false; // default linear like reference app
 let showTags     = true;  // whether H1–H8 harmonic frequency tags are drawn on the spectrogram
+let viewMode     = 'spec'; // 'spec' (heatmap) or 'timeline' (per-harmonic sounding bars)
 let sustainMode  = false; // when off, duration tracking/display is fully hidden; when on, duration
                            // starts automatically on note onset and is frozen only by the manual Stop button
 let selH         = new Array(NUM_H).fill(false);
@@ -347,6 +354,16 @@ let noteDuration = new Array(NUM_H).fill(null);  // seconds from onset to the ma
 let noteIsActive = new Array(NUM_H).fill(false); // whether this harmonic is currently being timed (sustain mode)
 let noteOnsetTime= new Array(NUM_H).fill(null);  // performance.now() timestamp when current note started sounding
 let hysteresisOn = new Array(NUM_H).fill(false); // latch: true once loud enough to start (sustain mode only)
+
+// Timeline view state: independent of Sustain Mode / harmonic selection.
+// Tracks, per harmonic, whether it's currently "sounding" (continuous bar)
+// and whether it's currently in a beat/warble trough (drawn as a pinch/notch
+// in the bar rather than a break, since the note hasn't actually died out).
+let timelineOn           = new Array(NUM_H).fill(false);
+let timelineSilenceCount = new Array(NUM_H).fill(0);
+let timelineNotch        = new Array(NUM_H).fill(false);
+let timelineDbBuf        = Array.from({length:NUM_H}, ()=>[]);
+const TIMELINE_DB_BUF_LEN = 20; // ~short rolling window used to detect local peak-to-current dip
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 const ONSET_DB_THRESHOLD = -40; // must reach at least this loud to be considered "sounding" (sustain start)
@@ -446,6 +463,8 @@ for (let h = 0; h < NUM_H; h++) {
 // ── Canvas init ────────────────────────────────────────────
 const spectroCanvas = document.getElementById("spectro-canvas");
 const spectroCtx    = spectroCanvas.getContext("2d");
+const timelineCanvas = document.getElementById("timeline-canvas");
+const timelineCtx    = timelineCanvas.getContext("2d");
 const freqAxisEl    = document.getElementById("freq-axis");
 
 function initCanvas() {
@@ -478,12 +497,24 @@ function initLevelHistCanvas() {
   levelHistCtx.fillStyle = "#000";
   levelHistCtx.fillRect(0, 0, levelHistCanvas.width, levelHistCanvas.height);
 }
+function initTimelineCanvas() {
+  const dpr  = window.devicePixelRatio || 1;
+  const wrap = timelineCanvas.parentElement;
+  const w    = wrap.offsetWidth  || 320;
+  const h    = wrap.offsetHeight || 300;
+  timelineCanvas.width  = w * dpr;
+  timelineCanvas.height = h * dpr;
+  timelineCanvas.style.width  = w + "px";
+  timelineCanvas.style.height = h + "px";
+  timelineCtx.fillStyle = "#000";
+  timelineCtx.fillRect(0, 0, timelineCanvas.width, timelineCanvas.height);
+}
 // Explicitly (re)assert the default view range before the very first
 // canvas init, in case anything touched viewLo/viewHi before this point.
 viewLo = logScale ? 10 : 0;
 viewHi = 4200;
-requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); }));
-window.addEventListener("resize", ()=>{ initCanvas(); initLevelHistCanvas(); });
+requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }));
+window.addEventListener("resize", ()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); });
 
 // ── Touch: 1-finger scroll + pinch zoom ───────────────────
 let pinchDist0=null, pinchLo0=null, pinchHi0=null, pinchCF=null;
@@ -937,6 +968,28 @@ function renderLoop() {
     const result=detectBeat(fftData,sr,hf);
     const curDb = result ? result.db : -Infinity;
 
+    // Timeline view tracking: independent of Sustain Mode and harmonic
+    // selection, always runs so the TIMELINE view is accurate the
+    // moment it's switched to. Reuses the same -40dB onset / -75dB
+    // silence thresholds as Sustain Mode, but fully automatic (no
+    // manual Stop needed) since this is a passive visualization.
+    // A temporary volume dip that stays above STOP_DB_THRESHOLD does
+    // NOT break the bar — only a sustained drop below it does, after a
+    // short debounce so brief blips in the analysis don't chop the bar.
+    if (curDb >= ONSET_DB_THRESHOLD) {
+      timelineOn[h] = true;
+      timelineSilenceCount[h] = 0;
+    } else if (curDb < STOP_DB_THRESHOLD) {
+      timelineSilenceCount[h]++;
+      if (timelineSilenceCount[h] > BEAT_NULL_THRESH) timelineOn[h] = false;
+    } else {
+      timelineSilenceCount[h] = 0; // still fading, not truly silent — bar continues
+    }
+    timelineDbBuf[h].push(isFinite(curDb) ? curDb : -96);
+    if (timelineDbBuf[h].length > TIMELINE_DB_BUF_LEN) timelineDbBuf[h].shift();
+    const winMax = Math.max(...timelineDbBuf[h]);
+    timelineNotch[h] = timelineOn[h] && (winMax - (isFinite(curDb)?curDb:-96) > MIN_BEAT_SWING_DB);
+
     // Sustain-mode duration tracking. Only runs when sustainMode is
     // enabled — otherwise the whole feature is inert (matches the
     // requirement that nothing is tracked/displayed until turned on).
@@ -1016,7 +1069,11 @@ function renderLoop() {
       }
     }
   }
-  drawSpectroColumn(binSize);
+  if (viewMode === 'spec') {
+    drawSpectroColumn(binSize);
+  } else {
+    drawTimelineColumn();
+  }
   updateBeatDisplay();
   updateFreqAxisLabels();
 }
@@ -1076,12 +1133,46 @@ function drawSpectroColumn(binSize) {
       const hf=currentFreq*(h+1);
       if (hf<viewLo||hf>viewHi) continue;
       const py=freqToY(hf,H);
-      offCtx.strokeStyle=selH[h]?"rgba(0,0,0,0.85)":"rgba(255,220,0,0.2)";
-      offCtx.lineWidth=selH[h]?1.5*dpr:dpr;
+      offCtx.strokeStyle="rgba(255,220,0,0.2)";
+      offCtx.lineWidth=dpr;
       offCtx.beginPath(); offCtx.moveTo(colX,py); offCtx.lineTo(colX+colW,py); offCtx.stroke();
     }
   }
   spectroCtx.drawImage(offCanvas,0,0);
+}
+
+// ── Timeline view: continuous per-harmonic sounding bars ───────────
+// H8 lane at the top, H1 at the bottom (matches the spectrogram's
+// high-freq-at-top convention). Each bar stays solid while the
+// harmonic is continuously sounding (timelineOn), even through
+// temporary volume dips from beating — those dips are drawn as a
+// pinched/narrowed waist in the bar (timelineNotch) rather than a
+// gap, so the beat rhythm is visible without implying the note
+// actually stopped and restarted.
+function drawTimelineColumn() {
+  if (!timelineCanvas || !timelineCanvas.width) return;
+  const W=timelineCanvas.width, H=timelineCanvas.height;
+  const dpr=window.devicePixelRatio||1;
+  const shift=SCROLL_SPD*dpr;
+  timelineCtx.drawImage(timelineCanvas,-shift,0);
+  const colW=Math.ceil(shift)+1, colX=W-colW;
+  timelineCtx.fillStyle="#000";
+  timelineCtx.fillRect(colX,0,colW,H);
+  const laneH = H/NUM_H;
+  for (let h=0; h<NUM_H; h++) {
+    const rowFromTop = NUM_H-1-h; // H8 at row 0 (top) ... H1 at row NUM_H-1 (bottom)
+    const laneTop = rowFromTop*laneH;
+    timelineCtx.strokeStyle="rgba(255,255,255,0.06)";
+    timelineCtx.lineWidth=dpr;
+    timelineCtx.beginPath(); timelineCtx.moveTo(colX,laneTop); timelineCtx.lineTo(colX+colW,laneTop); timelineCtx.stroke();
+    if (!timelineOn[h]) continue;
+    const pad = laneH*0.18;
+    const notch = timelineNotch[h];
+    const barTop = laneTop+pad + (notch ? laneH*0.22 : 0);
+    const barH   = (laneH-2*pad) - (notch ? laneH*0.44 : 0);
+    timelineCtx.fillStyle = notch ? "rgba(255,170,40,0.75)" : "rgba(0,220,120,0.9)";
+    timelineCtx.fillRect(colX, barTop, colW, Math.max(1,barH));
+  }
 }
 
 // ── Freq axis labels ───────────────────────────────────────
@@ -1096,6 +1187,22 @@ function updateFreqAxisLabels() {
   const H=spectroCanvas.clientHeight||300;
   if (H<10) return;
   const LABEL_MARGIN = 9; // half label height, roughly — keeps labels from clipping at the edges
+
+  if (viewMode === 'timeline') {
+    // Timeline mode: the left ruler shows lane labels H8 (top) .. H1
+    // (bottom) instead of a frequency scale; no in-graph tags needed.
+    const laneH = H/NUM_H;
+    for (let h=0; h<NUM_H; h++) {
+      const rowFromTop = NUM_H-1-h;
+      const y = rowFromTop*laneH + laneH/2;
+      const lbl=document.createElement("div");
+      lbl.className="ruler-label";
+      lbl.style.top=Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y))+"px";
+      lbl.textContent="H"+(h+1);
+      freqRulerEl.appendChild(lbl);
+    }
+    return;
+  }
 
   // Left-side ruler: tick + number, independent column outside the graph.
   const grids=[0,20,50,100,200,500,1000,2000,3000,4000,5000,6000,7000,8000,9000,10000];
@@ -1274,8 +1381,10 @@ function resetState() {
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
+  timelineOn=new Array(NUM_H).fill(false); timelineSilenceCount=new Array(NUM_H).fill(0); timelineNotch=new Array(NUM_H).fill(false); timelineDbBuf=Array.from({length:NUM_H},()=>[]);
   viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
+  if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
 }
 
 // ── Controls ───────────────────────────────────────────────
@@ -1369,6 +1478,22 @@ document.getElementById("scale-toggle").addEventListener("click", function() {
   // the other mode doesn't carry over and confuse the new scale.
   viewLo=logScale?10:0; viewHi=4200;
   if (offCtx&&offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+  lastAxisUpdate=0; updateFreqAxisLabels();
+});
+
+// SPEC / TIMELINE view toggle: swaps which canvas is visible and which
+// kind of ruler labels are shown. The underlying tracking state for
+// the timeline (timelineOn / timelineNotch) is always kept up to date
+// in the render loop regardless of which view is showing, so switching
+// mid-session immediately reflects the current sounding state.
+document.getElementById("view-toggle").addEventListener("click", function() {
+  viewMode = viewMode==='spec' ? 'timeline' : 'spec';
+  document.getElementById("view-label").textContent = viewMode==='spec' ? "SPEC" : "TIMELINE";
+  this.style.background = viewMode==='timeline' ? "#2255aa" : "#446622";
+  document.getElementById("view-knob").style.left = viewMode==='timeline' ? "18px" : "2px";
+  spectroCanvas.style.display  = viewMode==='spec'     ? "block" : "none";
+  timelineCanvas.style.display = viewMode==='timeline' ? "block" : "none";
+  if (viewMode==='timeline') initTimelineCanvas();
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
 
