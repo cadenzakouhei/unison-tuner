@@ -1213,7 +1213,6 @@ function drawSpectroColumn(binSize) {
   const d=img.data;
   const ppb = estimatePixelsPerBin(H, binSize);
   const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
-  const bleed        = ppb>8 ? 0   : ppb>4 ? 0.35 : 0.9;
   const disp = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
@@ -1221,14 +1220,18 @@ function drawSpectroColumn(binSize) {
     const db=(bin>=0&&bin<disp.length)?disp[bin]:-120;
     const dbP1=(bin+1<disp.length)?disp[bin+1]:-120;
     const dbM1=(bin-1>=0)?disp[bin-1]:-120;
-    // bleed can be 0 at high zoom (see estimatePixelsPerBin above) — in
-    // that case dbP1*0 / dbM1*0 both evaluate to exactly 0, which for
-    // typically-negative dB values is *louder* than the real level and
-    // was previously winning the Math.max, saturating the whole screen
-    // red regardless of actual signal. Skip the neighbor terms entirely
-    // when there's no bleed to apply, rather than letting the multiply
-    // silently inject a spurious 0dB floor.
-    const dbMax = bleed>0 ? Math.max(db,dbP1*bleed,dbM1*bleed) : db;
+    // Neighbor-bin "bleed" (borrowing brightness from an adjacent bin
+    // when it's louder) must stay a FIXED multiplier here, not scaled
+    // down with zoom: dB values are negative/logarithmic, and
+    // multiplying a very negative value by a *smaller* fraction moves
+    // it *closer to 0* (i.e. makes it look louder, not quieter) — the
+    // opposite of "less bleed". A previous attempt to shrink this
+    // weight at high zoom caused exactly that: near-silent bins were
+    // getting brightened into solid color across the whole screen.
+    // The zoom-dependent thinning above (smoothRadius) is sufficient
+    // and doesn't have this problem, since it averages in linear
+    // amplitude space rather than multiplying dB directly.
+    const dbMax = Math.max(db,dbP1*0.9,dbM1*0.9);
     const [r,g,b]=dbToRGB(dbMax);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
