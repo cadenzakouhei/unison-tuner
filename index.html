@@ -1221,7 +1221,14 @@ function drawSpectroColumn(binSize) {
     const db=(bin>=0&&bin<disp.length)?disp[bin]:-120;
     const dbP1=(bin+1<disp.length)?disp[bin+1]:-120;
     const dbM1=(bin-1>=0)?disp[bin-1]:-120;
-    const dbMax=Math.max(db,dbP1*bleed,dbM1*bleed);
+    // bleed can be 0 at high zoom (see estimatePixelsPerBin above) — in
+    // that case dbP1*0 / dbM1*0 both evaluate to exactly 0, which for
+    // typically-negative dB values is *louder* than the real level and
+    // was previously winning the Math.max, saturating the whole screen
+    // red regardless of actual signal. Skip the neighbor terms entirely
+    // when there's no bleed to apply, rather than letting the multiply
+    // silently inject a spurious 0dB floor.
+    const dbMax = bleed>0 ? Math.max(db,dbP1*bleed,dbM1*bleed) : db;
     const [r,g,b]=dbToRGB(dbMax);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
