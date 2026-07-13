@@ -339,6 +339,13 @@ let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
 let beatNullCount= new Array(NUM_H).fill(0);
 let statusVals   = new Array(NUM_H).fill(0);
 let currentFreq  = null;
+// Actual (peak-snapped) harmonic frequencies, refreshed each frame.
+// Real piano strings are inharmonic — overtones run slightly sharp of
+// exact integer multiples of the fundamental, increasingly so for
+// higher harmonics — so the tags/guide-lines are snapped to the
+// nearest real spectral peak near each theoretical h*f0 position
+// rather than drawn at the theoretical position itself.
+let harmonicFreqRefined = new Array(NUM_H).fill(null);
 let pendingFreq  = null; // candidate new pitch awaiting confirmation across several frames
 let pendingCount = 0;    // how many consecutive frames have agreed with pendingFreq
 let viewLo       = 0;
@@ -835,6 +842,27 @@ function detectPitch(data, sr, timeSamples) {
   return coarseFreq;
 }
 
+// Snap a theoretical harmonic frequency (h * fundamental) to the
+// nearest real spectral peak nearby, to compensate for piano string
+// inharmonicity (real overtones run progressively sharper than exact
+// integer multiples as harmonic number increases). Falls back to the
+// theoretical frequency itself if no clear peak is found in range.
+function refineHarmonicFreq(data, sr, theoreticalFreq, h) {
+  if (!theoreticalFreq) return null;
+  const binSize = sr/FFT_SIZE;
+  const tolHz = Math.max(binSize*3, theoreticalFreq*(0.004+h*0.0035));
+  const cBin = Math.round(theoreticalFreq/binSize);
+  const wBins = Math.max(2, Math.round(tolHz/binSize));
+  const s = Math.max(1, cBin-wBins), e = Math.min(data.length-2, cBin+wBins);
+  let bestBin=-1, bestDb=-Infinity;
+  for (let i=s;i<=e;i++) {
+    if (data[i]>data[i-1] && data[i]>data[i+1] && data[i]>bestDb && data[i]>-85) {
+      bestDb=data[i]; bestBin=i;
+    }
+  }
+  return bestBin<0 ? theoreticalFreq : bestBin*binSize;
+}
+
 function detectBeat(data, sr, hFreq) {
   if (!hFreq) return null;
   const binSize=sr/FFT_SIZE;
@@ -992,7 +1020,9 @@ function renderLoop() {
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
   for (let h=0;h<NUM_H;h++) {
-    const hf=currentFreq?currentFreq*(h+1):null;
+    const hfTheory=currentFreq?currentFreq*(h+1):null;
+    const hf=hfTheory?refineHarmonicFreq(fftData,sr,hfTheory,h):null;
+    harmonicFreqRefined[h]=hf;
     const result=detectBeat(fftData,sr,hf);
     const curDb = result ? result.db : -Infinity;
 
@@ -1139,15 +1169,15 @@ function renderLoop() {
 // ピーク自体の高さはほぼ保ったまま、視覚的な帯の太さを参考アプリ
 // 相当(数px〜十数px)に広げる。dB領域で平均すると弱い側に引っ張られて
 // ピークが鈍るため、必ずリニア領域で計算してからdBに戻す。
-const SMOOTH_RADIUS = 4; // ±4 bin (9-tap)
-function smoothFreqDataForDisplay(data) {
+const SMOOTH_RADIUS = 4; // ±4 bin (9-tap) — used at normal/zoomed-out view; shrinks automatically when zoomed in (see estimatePixelsPerBin)
+function smoothFreqDataForDisplay(data, radius) {
   const n = data.length;
   const out = new Float32Array(n);
   for (let i=0; i<n; i++) {
     let sum=0, wsum=0;
-    const s=Math.max(0,i-SMOOTH_RADIUS), e=Math.min(n-1,i+SMOOTH_RADIUS);
+    const s=Math.max(0,i-radius), e=Math.min(n-1,i+radius);
     for (let j=s; j<=e; j++) {
-      const w = 1 - Math.abs(j-i)/(SMOOTH_RADIUS+1);
+      const w = radius>0 ? 1 - Math.abs(j-i)/(radius+1) : 1;
       sum += Math.pow(10, data[j]/20) * w;
       wsum += w;
     }
@@ -1155,6 +1185,21 @@ function smoothFreqDataForDisplay(data) {
     out[i] = 20*Math.log10(Math.max(avgLin, 1e-12));
   }
   return out;
+}
+
+// How many screen pixels one FFT bin currently spans, at the given
+// zoom/scale. At the default zoomed-out view a bin is only a couple
+// pixels tall, so a few bins' worth of smoothing/bleed reads as a
+// pleasingly solid band; pinch-zoomed in, that same bin count can
+// span dozens of pixels, making bands look bloated and overlapping
+// neighboring harmonics. Scaling the smoothing/bleed down as this
+// value grows keeps the visual band thickness roughly constant on
+// screen regardless of zoom level.
+function estimatePixelsPerBin(H, binSize) {
+  const midFreq = logScale ? Math.sqrt(Math.max(1,viewLo)*Math.max(viewLo+1,viewHi)) : (viewLo+viewHi)/2;
+  const y1 = freqToY(midFreq, H);
+  const y2 = freqToY(Math.min(viewHi, midFreq+binSize), H);
+  return Math.max(0.01, Math.abs(y1-y2));
 }
 
 function drawSpectroColumn(binSize) {
@@ -1166,14 +1211,17 @@ function drawSpectroColumn(binSize) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
-  const disp = smoothFreqDataForDisplay(fftData); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
+  const ppb = estimatePixelsPerBin(H, binSize);
+  const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
+  const bleed        = ppb>8 ? 0   : ppb>4 ? 0.35 : 0.9;
+  const disp = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const bin=Math.round(freq/binSize);
     const db=(bin>=0&&bin<disp.length)?disp[bin]:-120;
     const dbP1=(bin+1<disp.length)?disp[bin+1]:-120;
     const dbM1=(bin-1>=0)?disp[bin-1]:-120;
-    const dbMax=Math.max(db,dbP1*0.9,dbM1*0.9);
+    const dbMax=Math.max(db,dbP1*bleed,dbM1*bleed);
     const [r,g,b]=dbToRGB(dbMax);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
@@ -1183,8 +1231,8 @@ function drawSpectroColumn(binSize) {
   offCtx.putImageData(img,colX,0);
   if (currentFreq) {
     for (let h=0;h<NUM_H;h++) {
-      const hf=currentFreq*(h+1);
-      if (hf<viewLo||hf>viewHi) continue;
+      const hf=harmonicFreqRefined[h];
+      if (!hf||hf<viewLo||hf>viewHi) continue;
       const py=freqToY(hf,H);
       offCtx.strokeStyle="rgba(255,220,0,0.2)";
       offCtx.lineWidth=dpr;
@@ -1291,8 +1339,8 @@ function updateFreqAxisLabels() {
   // In-graph harmonic labels, kept inside the spectrogram area.
   if (showTags && currentFreq) {
     for (let h=0;h<NUM_H;h++) {
-      const hf=currentFreq*(h+1);
-      if (hf<=viewLo||hf>=viewHi) continue;
+      const hf=harmonicFreqRefined[h];
+      if (!hf||hf<=viewLo||hf>=viewHi) continue;
       const y=freqToY(hf,H);
       if (y<0||y>H) continue;
       const lbl=document.createElement("div");
@@ -1460,6 +1508,7 @@ function resetState() {
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   ampLinBuf=Array.from({length:NUM_H},()=>[]); ampEmaxTrack=new Array(NUM_H).fill(null); phaseEstBeatHz=new Array(NUM_H).fill(null);
+  harmonicFreqRefined=new Array(NUM_H).fill(null);
   viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
   if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
