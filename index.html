@@ -588,14 +588,18 @@ swrap.addEventListener("touchmove", e => {
     if (logScale) {
       // Work in log2 space, which is what actually maps linearly to
       // pixel position on screen when logScale is active.
-      // Use a fixed sensitivity (relative to the full log-range) rather
-      // than the current zoomed range, so scrolling never feels "stuck"
-      // even when heavily zoomed in.
-      const fullLogRange = Math.log2(FREQ_HI) - Math.log2(Math.max(1,FREQ_LO));
+      // Sensitivity is proportional to the CURRENT zoomed range (not
+      // the full 10Hz–10kHz range): dragging the full screen height
+      // pans by exactly one screen's worth of visible range, at any
+      // zoom level. A fixed full-range sensitivity was tried
+      // previously, but at high zoom it made every small drag jump by
+      // a huge amount relative to the (now tiny) visible window,
+      // making it effectively impossible to fine-tune the scroll
+      // position (e.g. landing precisely on 0Hz–200Hz).
       const logLo0 = Math.log2(Math.max(1, viewLo));
       const logHi0 = Math.log2(viewHi);
       const logRange = logHi0 - logLo0;
-      const shift = (dragPx / H) * fullLogRange * 0.6;
+      const shift = (dragPx / H) * logRange;
       let logLo = logLo0 + shift, logHi = logHi0 + shift;
       let lo = Math.pow(2, logLo), hi = Math.pow(2, logHi);
       if (lo < FREQ_LO) { lo = FREQ_LO; hi = Math.pow(2, Math.log2(lo) + logRange); }
@@ -603,13 +607,12 @@ swrap.addEventListener("touchmove", e => {
       if (lo < FREQ_LO) lo = FREQ_LO;
       viewLo = lo; viewHi = hi;
     } else {
-      // Same fixed-sensitivity approach for linear mode.
+      // Same proportional-sensitivity approach for linear mode.
       // LIN mode's true floor is 0Hz (not FREQ_LO, which exists only
       // because log2(0) is undefined for LOG mode).
       const LIN_FLOOR = 0;
-      const fullRange = FREQ_HI - LIN_FLOOR;
       const range = viewHi - viewLo;
-      const shift = (dragPx / H) * fullRange * 0.6;
+      const shift = (dragPx / H) * range;
       let lo = viewLo + shift, hi = viewHi + shift;
       if (lo < LIN_FLOOR) { lo=LIN_FLOOR; hi=lo+range; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
@@ -1216,10 +1219,19 @@ function drawSpectroColumn(binSize) {
   const disp = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
-    const bin=Math.round(freq/binSize);
-    const db=(bin>=0&&bin<disp.length)?disp[bin]:-120;
-    const dbP1=(bin+1<disp.length)?disp[bin+1]:-120;
-    const dbM1=(bin-1>=0)?disp[bin-1]:-120;
+    // Linear interpolation between the two nearest bins, rather than
+    // snapping to the single nearest one, so zooming in reveals a
+    // smooth gradient instead of a hard-edged staircase — several
+    // consecutive screen rows no longer just repeat the exact same
+    // bin's value verbatim when zoomed past the point where one bin
+    // spans multiple pixels.
+    const fbin=freq/binSize;
+    const bin0=Math.floor(fbin), bin1=bin0+1, frac=fbin-bin0;
+    const sampleDb=(b)=>(b>=0&&b<disp.length)?disp[b]:-120;
+    const dbLo=sampleDb(bin0), dbHi=sampleDb(bin1);
+    const db=dbLo+(dbHi-dbLo)*frac;
+    const dbP1=sampleDb(bin1+1);
+    const dbM1=sampleDb(bin0-1);
     // Neighbor-bin "bleed" (borrowing brightness from an adjacent bin
     // when it's louder) must stay a FIXED multiplier here, not scaled
     // down with zoom: dB values are negative/logarithmic, and
