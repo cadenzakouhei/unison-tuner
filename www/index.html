@@ -528,6 +528,15 @@ function initTimelineCanvas() {
 viewLo = logScale ? 10 : 0;
 viewHi = 4000;
 requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }));
+// Safety re-init: on a cold app launch, the WKWebView's layout
+// (safe-area insets, dynamic viewport units) can occasionally still
+// be settling slightly after the double-rAF above already ran,
+// leaving the canvas sized against stale measurements. A couple of
+// delayed re-measurements catch that without any visible effect if
+// the layout was already correct (re-running this is cheap and
+// idempotent).
+setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 300);
+setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 1000);
 window.addEventListener("resize", ()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); });
 
 // ── Touch: 1-finger scroll + pinch zoom ───────────────────
@@ -725,7 +734,22 @@ function stopMic() {
 function resetSpectrogramView() {
   viewLo = logScale ? 10 : 0;
   viewHi = 4000;
-  if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+  // Re-measure and rebuild the canvas backing buffer too, not just the
+  // logical view range. On a cold launch, the very first initCanvas()
+  // call (guarded by a double requestAnimationFrame) can still
+  // occasionally run before the WKWebView's layout has fully settled
+  // (safe-area insets, dynamic viewport units, etc.), capturing a
+  // stale/incorrect height. Everything downstream — the frequency-to-
+  // pixel mapping, label positions, and the touch-drag math (which
+  // reads the canvas's actual rendered size) — inherits that mistake,
+  // which looked like "the view doesn't start at 0Hz" and "dragging
+  // doesn't reach the bottom" even though the logical range above was
+  // correct the whole time. Re-running these once layout is
+  // definitely stable (mic start, app foreground, double-tap) fixes
+  // it at the source instead of working around symptoms.
+  if (typeof initCanvas === "function") initCanvas();
+  if (typeof initLevelHistCanvas === "function") initLevelHistCanvas();
+  if (typeof initTimelineCanvas === "function") initTimelineCanvas();
   lastAxisUpdate = 0;
 }
 // iOS commonly resumes a suspended WKWebView instance instead of
