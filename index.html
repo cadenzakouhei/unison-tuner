@@ -450,6 +450,42 @@ function yToFreq(y, H) {
   }
 }
 
+// When a genuinely new note is confirmed (see renderLoop), shift the
+// visible spectrogram range — WITHOUT changing the current zoom level
+// — so the fundamental (H1) is guaranteed to be on screen, instead of
+// requiring a manual scroll after every new note. Only shifts if the
+// fundamental isn't already comfortably visible, so it doesn't jump
+// around during normal sustained playing within the current view.
+function autoScrollToFundamental() {
+  if (currentFreq === null) return;
+  const floor = logScale ? FREQ_LO : 0;
+  const margin = logScale
+    ? (Math.log2(viewHi) - Math.log2(Math.max(1,viewLo))) * 0.08
+    : (viewHi - viewLo) * 0.08;
+  if (logScale) {
+    const logLo = Math.log2(Math.max(1,viewLo)), logHi = Math.log2(viewHi);
+    const logCur = Math.log2(Math.max(1,currentFreq));
+    if (logCur >= logLo+margin && logCur <= logHi-margin) return; // already comfortably visible
+    const range = logHi-logLo;
+    let newLogLo = logCur - margin, newLogHi = newLogLo + range;
+    let lo = Math.pow(2, newLogLo), hi = Math.pow(2, newLogHi);
+    if (lo < floor) { lo=floor; hi=Math.pow(2, Math.log2(lo)+range); }
+    if (hi > FREQ_HI) { hi=FREQ_HI; lo=Math.pow(2, Math.log2(hi)-range); }
+    if (lo < floor) lo = floor;
+    viewLo = lo; viewHi = hi;
+  } else {
+    if (currentFreq >= viewLo+margin && currentFreq <= viewHi-margin) return; // already comfortably visible
+    const range = viewHi-viewLo;
+    let lo = currentFreq - margin, hi = lo + range;
+    if (lo < floor) { lo=floor; hi=lo+range; }
+    if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
+    if (lo < floor) lo = floor;
+    viewLo = lo; viewHi = hi;
+  }
+  if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+  lastAxisUpdate = 0;
+}
+
 // ── Build UI ───────────────────────────────────────────────
 const hsBtns   = [];
 const beatCards= [];
@@ -982,6 +1018,7 @@ function renderLoop() {
     if (currentFreq===null) {
       currentFreq = freq;
       pendingFreq = null; pendingCount = 0;
+      autoScrollToFundamental();
     } else if (Math.abs(freq-currentFreq)/currentFreq > 0.03) {
       // Candidate "new note" — only accept after it repeats consistently.
       if (pendingFreq !== null && Math.abs(freq-pendingFreq)/pendingFreq < 0.01) {
@@ -992,6 +1029,7 @@ function renderLoop() {
       if (pendingCount >= 4) {
         currentFreq = freq;
         pendingFreq = null; pendingCount = 0;
+        autoScrollToFundamental();
       }
       // While unconfirmed, keep showing the previous stable pitch.
     } else {
