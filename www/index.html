@@ -633,8 +633,30 @@ swrap.addEventListener("touchmove", e => {
   }
 }, {passive:false});
 
+let lastSpectroTapTime=0, lastSpectroTapX=0, lastSpectroTapY=0;
 swrap.addEventListener("touchend", e => {
-  if (e.touches.length === 0) { scrollY0=null; pinchDist0=null; }
+  if (e.touches.length === 0) {
+    scrollY0=null; pinchDist0=null;
+    // Double-tap-to-reset: two quick taps in roughly the same spot on
+    // the spectrogram reset the view to the default 0Hz–4200Hz range.
+    // A manual way back in case the view is ever scrolled/zoomed
+    // somewhere confusing. Native double-tap-zoom is already disabled
+    // app-wide, so this gesture is free to reuse here.
+    const t = e.changedTouches && e.changedTouches[0];
+    if (t) {
+      const now = Date.now();
+      const dx = t.clientX-lastSpectroTapX, dy = t.clientY-lastSpectroTapY;
+      if (now-lastSpectroTapTime <= 350 && (dx*dx+dy*dy) <= (30*30)) {
+        viewLo = logScale ? 10 : 0;
+        viewHi = 4200;
+        if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+        lastAxisUpdate = 0;
+        lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
+      } else {
+        lastSpectroTapTime = now; lastSpectroTapX = t.clientX; lastSpectroTapY = t.clientY;
+      }
+    }
+  }
   else if (e.touches.length === 1) {
     pinchDist0=null;
     scrollY0=e.touches[0].clientY; scrollLo0=viewLo; scrollHi0=viewHi;
@@ -697,7 +719,19 @@ function stopMic() {
   resetLevelHistory();
 }
 document.addEventListener("visibilitychange", ()=>{
-  if (!document.hidden && audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
+  if (!document.hidden) {
+    if (audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
+    // iOS commonly resumes a suspended WKWebView instance instead of
+    // reloading it, so JS state (including whatever zoom/scroll the
+    // spectrogram was left at) can persist silently across an app
+    // switch. Reset to the known-good default range every time the
+    // app comes back to the foreground, so it's never possible to
+    // return to a session that's stuck scrolled somewhere confusing.
+    viewLo = logScale ? 10 : 0;
+    viewHi = 4200;
+    if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+    lastAxisUpdate = 0;
+  }
 });
 
 // ── Prevent double-tap-to-zoom across the whole app ────────
