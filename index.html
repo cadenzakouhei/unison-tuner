@@ -136,6 +136,19 @@ border-radius: 2px; position: relative;
 }
 .db-tick { position: absolute; right: -18px; font-size: 8px; color: #aaa; transform: translateY(-50%); white-space: nowrap; }
 
+/* Note duration gauge (below the spectrogram) */
+#note-duration-bar {
+background: #1a1a1a; border-top: 1px solid #333; border-bottom: 1px solid #333;
+padding: 4px 10px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+#note-duration-label { font-size: 10px; color: #ccc; letter-spacing: 0.5px; flex-shrink: 0; }
+#note-duration-track {
+flex: 1; height: 8px; background: #000; border-radius: 3px;
+overflow: hidden; border: 1px solid #333; min-width: 0;
+}
+#note-duration-fill { height: 100%; width: 0%; background: linear-gradient(to right, #0a5, #0e8); transition: width 0.1s linear; }
+#note-duration-val { font-size: 11px; color: #ddd; min-width: 48px; text-align: right; flex-shrink: 0; }
+
 /* Beat bar */
 #beat-bar {
 background: #1a1a1a; border-top: 1px solid #333;
@@ -263,15 +276,17 @@ color: #ff8888; font-weight: bold;
   </div>
 </div>
 
+<div id="note-duration-bar">
+  <span id="note-duration-label">DURATION</span>
+  <div id="note-duration-track"><div id="note-duration-fill"></div></div>
+  <span id="note-duration-val">— s</span>
+</div>
+
 <div id="bottom-overlay">
   <div class="section-label">
     <span>Beat Frequency — Selected Harmonics</span>
     <div style="display:flex;align-items:center;gap:6px;">
       <button id="btn-sustain-stop" class="ctrl-btn">⏹ STOP</button>
-      <span id="phase-label" style="font-size:10px;color:#ccc;">PHASE EST</span>
-      <div id="phase-toggle" class="toggle-switch">
-        <div id="phase-knob" class="toggle-knob"></div>
-      </div>
       <span id="sustain-label" style="font-size:10px;color:#ccc;">SUSTAIN</span>
       <div id="sustain-toggle" class="toggle-switch">
         <div id="sustain-knob" class="toggle-knob"></div>
@@ -374,23 +389,6 @@ let timelineOn           = new Array(NUM_H).fill(false);
 let timelineDbHeld       = new Array(NUM_H).fill(-96); // slow-release smoothed level, drives both on/off and bar thickness
 const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief detection dropouts without a real gap
 
-// Phase-derivative beat period estimator (opt-in via the PHASE EST
-// toggle; OFF by default). Rather than waiting to observe an actual
-// peak-to-peak cycle in the amplitude envelope (which for a very slow
-// beat can take many seconds before any estimate is available at
-// all), this treats the envelope as E(t) = Emax*|cos(pi*deltaF*t)|
-// and solves for deltaF directly from the instantaneous envelope
-// value and its rate of change. This can, in principle, produce a
-// usable estimate long before a full beat cycle has been observed —
-// though it is inherently approximate (assumes both strings are close
-// to equal loudness, and is unreliable very near envelope peaks/
-// troughs where the derivative vanishes), so it's shown as a
-// secondary "≈" estimate alongside the existing measured value.
-let phaseEstMode    = false;
-let ampLinBuf        = Array.from({length:NUM_H}, ()=>[]); // rolling {t, lin} amplitude samples
-let ampEmaxTrack     = new Array(NUM_H).fill(null);        // slowly-decaying recent-max linear amplitude (~Emax)
-let phaseEstBeatHz   = new Array(NUM_H).fill(null);        // last usable deltaF estimate, Hz
-const PHASE_EST_BUF_MS = 400; // window used for the local envelope derivative
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 const ONSET_DB_THRESHOLD = -40; // must reach at least this loud to be considered "sounding" (sustain start)
@@ -403,6 +401,18 @@ const STOP_DB_THRESHOLD  = -75; // reference floor value (manual Stop button is 
 // on/off latch doesn't chatter right at the boundary.
 function timelineOnsetDb() { return -96 + spectroGain; }
 function timelineStopDb()  { return timelineOnsetDb() - 1; }
+
+// Note duration gauge (below the spectrogram): tracks how long the
+// currently-sounding note has been ringing, independent of harmonic
+// selection and Sustain Mode. Onset/stop use the same slow-release
+// held-level technique as the Timeline view (bridges brief dropouts
+// without a real gap), but applied to the overall input level rather
+// than any single harmonic, and fully automatic — no manual Stop
+// needed, since the gauge is meant to just read off elapsed time.
+let globalLevelHeld    = -96;
+let globalNoteOn       = false;
+let globalNoteOnsetTime= null;
+const NOTE_DURATION_GAUGE_MAX_S = 15; // seconds at which the fill bar reaches 100%; the numeric readout keeps counting past this
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let offCanvas=null, offCtx=null;
@@ -490,7 +500,7 @@ for (let h = 0; h < NUM_H; h++) {
   card.className = "beat-card";
   card.id = "bcard"+h;
   card.style.display = "none";
-  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}" style="display:none">— s</div><div class="bc-est" id="bce${h}" style="display:none;font-size:8px;color:#8ac6ff;margin-top:1px;">≈ — s</div>`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}" style="display:none">— s</div>`;
   beatBarEl.appendChild(card);
   beatCards[h] = card;
 }
@@ -991,6 +1001,23 @@ function renderLoop() {
   updateLevel(peak);
   drawLevelHistoryColumn(peak);
   updateLevelStats(peak);
+
+  // Global note-onset tracking for the duration gauge (see state
+  // comment above). Same slow-release-held-level technique as the
+  // Timeline view's per-harmonic tracking, applied to the overall
+  // input level instead.
+  if (isFinite(peak) && peak > globalLevelHeld) {
+    globalLevelHeld = peak;
+  } else {
+    globalLevelHeld = Math.max(-96, globalLevelHeld - TIMELINE_RELEASE_DB_PER_FRAME);
+  }
+  if (globalLevelHeld >= timelineOnsetDb()) {
+    if (!globalNoteOn) { globalNoteOn = true; globalNoteOnsetTime = performance.now(); }
+  } else if (globalLevelHeld < timelineStopDb()) {
+    globalNoteOn = false; globalNoteOnsetTime = null;
+  }
+  updateNoteDurationGauge();
+
   const freq=detectPitch(fftData,sr,timeData);
   if (freq) {
     // Smooth currentFreq so the H1–H8 guide lines / labels don't jitter
@@ -1085,30 +1112,6 @@ function renderLoop() {
       ampNullCount[h]=0;
       if (noteStartTime[h]===null) noteStartTime[h]=now;
 
-      if (phaseEstMode) {
-        const lin = Math.pow(10, result.db/20);
-        ampLinBuf[h].push({t:now, lin});
-        while (ampLinBuf[h].length && now-ampLinBuf[h][0].t > PHASE_EST_BUF_MS) ampLinBuf[h].shift();
-        if (ampEmaxTrack[h]===null || lin>ampEmaxTrack[h]) ampEmaxTrack[h]=lin;
-        else ampEmaxTrack[h] *= 0.999; // slow decay so a stale high value doesn't stick forever
-        if (ampLinBuf[h].length>=6 && ampEmaxTrack[h]>0) {
-          const first=ampLinBuf[h][0], last=ampLinBuf[h][ampLinBuf[h].length-1];
-          const dt=(last.t-first.t)/1000;
-          if (dt>0.05) {
-            const dEdt = (last.lin-first.lin)/dt;
-            const ratio = Math.min(0.98, Math.max(-0.98, ((last.lin+first.lin)/2)/ampEmaxTrack[h]));
-            const sinTheta = Math.sqrt(Math.max(0, 1-ratio*ratio));
-            // Skip the update very close to an envelope peak/trough
-            // (sinTheta≈0): the derivative-based formula divides by
-            // sinTheta there and becomes numerically unstable.
-            if (sinTheta > 0.12) {
-              const freqEst = Math.abs(dEdt) / (Math.PI*ampEmaxTrack[h]*sinTheta);
-              if (freqEst>0.001 && freqEst<20) phaseEstBeatHz[h]=freqEst;
-            }
-          }
-        }
-      }
-
       ampEnv[h].push({t:now, db:result.db});
       while (ampEnv[h].length && now - ampEnv[h][0].t > ENV_KEEP_MS) ampEnv[h].shift();
 
@@ -1190,19 +1193,27 @@ function smoothFreqDataForDisplay(data, radius) {
   return out;
 }
 
-// How many screen pixels one FFT bin currently spans, at the given
-// zoom/scale. At the default zoomed-out view a bin is only a couple
-// pixels tall, so a few bins' worth of smoothing/bleed reads as a
-// pleasingly solid band; pinch-zoomed in, that same bin count can
-// span dozens of pixels, making bands look bloated and overlapping
-// neighboring harmonics. Scaling the smoothing/bleed down as this
-// value grows keeps the visual band thickness roughly constant on
-// screen regardless of zoom level.
+// How many screen pixels one FFT bin currently spans AT A GIVEN
+// FREQUENCY, at the current zoom/scale. At the default zoomed-out
+// view a bin is only a couple pixels tall, so a few bins' worth of
+// smoothing/bleed reads as a pleasingly solid band; pinch-zoomed in,
+// that same bin count can span dozens of pixels, making bands look
+// bloated and overlapping neighboring harmonics. Scaling the
+// smoothing down as this value grows keeps the visual band thickness
+// roughly constant on screen regardless of zoom level.
+function pixelsPerBinAt(freq, H, binSize) {
+  const y1 = freqToY(freq, H);
+  const y2 = freqToY(Math.min(viewHi, freq+binSize), H);
+  return Math.max(0.01, Math.abs(y1-y2));
+}
+// Single-value convenience wrapper evaluated at the view's midpoint
+// frequency. In LIN mode pixel-per-Hz density is uniform across the
+// whole visible range, so this one value is accurate for every row.
+// In LOG mode it is NOT uniform (see drawSpectroColumn), so this
+// wrapper is only used there as a fallback/reference, not per-row.
 function estimatePixelsPerBin(H, binSize) {
   const midFreq = logScale ? Math.sqrt(Math.max(1,viewLo)*Math.max(viewLo+1,viewHi)) : (viewLo+viewHi)/2;
-  const y1 = freqToY(midFreq, H);
-  const y2 = freqToY(Math.min(viewHi, midFreq+binSize), H);
-  return Math.max(0.01, Math.abs(y1-y2));
+  return pixelsPerBinAt(midFreq, H, binSize);
 }
 
 function drawSpectroColumn(binSize) {
@@ -1214,11 +1225,40 @@ function drawSpectroColumn(binSize) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
-  const ppb = estimatePixelsPerBin(H, binSize);
-  const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
-  const disp = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
+  // In LIN mode, pixel-per-Hz density is the same everywhere in the
+  // visible range, so one global smoothing radius (from the view's
+  // midpoint) is accurate for every row and only needs computing
+  // once. In LOG mode, density varies strongly with frequency — the
+  // same Hz-wide bin spans far more screen pixels near the bottom of
+  // the view than near the top — so using one global radius made the
+  // band look thick in the bass and thin in the treble regardless of
+  // overall zoom level. Precomputing all three smoothing tiers once
+  // per column (cheap: each is a single O(bins) pass) and picking the
+  // right one PER ROW, based on that row's own local pixel-per-bin
+  // density, keeps the band thickness consistent across the whole
+  // register in LOG mode too.
+  let dispTiers=null, dispLin=null;
+  if (logScale) {
+    dispTiers = {
+      1: smoothFreqDataForDisplay(fftData, 1),
+      2: smoothFreqDataForDisplay(fftData, 2),
+      4: smoothFreqDataForDisplay(fftData, SMOOTH_RADIUS)
+    };
+  } else {
+    const ppb = estimatePixelsPerBin(H, binSize);
+    const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
+    dispLin = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
+  }
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
+    let disp;
+    if (logScale) {
+      const ppbLocal = pixelsPerBinAt(freq, H, binSize);
+      const r = ppbLocal>8 ? 1 : ppbLocal>4 ? 2 : SMOOTH_RADIUS;
+      disp = dispTiers[r];
+    } else {
+      disp = dispLin;
+    }
     // Linear interpolation between the two nearest bins, rather than
     // snapping to the single nearest one, so zooming in reveals a
     // smooth gradient instead of a hard-edged staircase — several
@@ -1411,17 +1451,6 @@ function updateBeatDisplay() {
         durEl.textContent = "— s";
       }
     }
-
-    // Phase-derivative period estimate, only shown when PHASE EST is
-    // toggled on and a usable estimate exists for this harmonic.
-    const estEl = document.getElementById("bce"+h);
-    if (!phaseEstMode || phaseEstBeatHz[h]===null) {
-      estEl.style.display = "none";
-    } else {
-      estEl.style.display = "block";
-      const periodS = 1/phaseEstBeatHz[h];
-      estEl.textContent = "≈ " + (periodS>=100 ? periodS.toFixed(0) : periodS.toFixed(1)) + " s";
-    }
   }
   document.getElementById("beat-bar-empty").style.display=any?"none":"block";
 }
@@ -1491,6 +1520,20 @@ function updateLevel(db) {
   document.getElementById("level-db").textContent=isFinite(db)?db.toFixed(1)+" dB":"— dB";
 }
 
+function updateNoteDurationGauge() {
+  const fillEl = document.getElementById("note-duration-fill");
+  const valEl  = document.getElementById("note-duration-val");
+  if (globalNoteOn && globalNoteOnsetTime!==null) {
+    const elapsed = (performance.now() - globalNoteOnsetTime) / 1000;
+    const pct = Math.max(0, Math.min(100, elapsed/NOTE_DURATION_GAUGE_MAX_S*100));
+    fillEl.style.width = pct+"%";
+    valEl.textContent = elapsed.toFixed(1)+" s";
+  } else {
+    fillEl.style.width = "0%";
+    valEl.textContent = "— s";
+  }
+}
+
 // ── Sound level history strip-chart ─────────────────────────
 // Same scrolling technique as the spectrogram: shift the existing
 // canvas contents left by one column each frame, then draw a fresh
@@ -1553,8 +1596,8 @@ function resetState() {
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
-  ampLinBuf=Array.from({length:NUM_H},()=>[]); ampEmaxTrack=new Array(NUM_H).fill(null); phaseEstBeatHz=new Array(NUM_H).fill(null);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
+  globalLevelHeld=-96; globalNoteOn=false; globalNoteOnsetTime=null; updateNoteDurationGauge();
   viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
   if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
@@ -1668,21 +1711,6 @@ document.getElementById("view-toggle").addEventListener("click", function() {
   timelineCanvas.style.display = viewMode==='timeline' ? "block" : "none";
   if (viewMode==='timeline') initTimelineCanvas();
   lastAxisUpdate=0; updateFreqAxisLabels();
-});
-
-// PHASE EST: OFF by default. This is an experimental, opt-in feature —
-// turning it off not only hides the estimate but also stops the
-// underlying computation and clears all tracked state, so it has zero
-// effect on the app when disabled (easy to fully "revert" by leaving
-// it off, without needing to remove any code).
-document.getElementById("phase-toggle").addEventListener("click", function() {
-  phaseEstMode = !phaseEstMode;
-  this.style.background = phaseEstMode ? "#2255aa" : "#333";
-  document.getElementById("phase-knob").style.left = phaseEstMode ? "18px" : "2px";
-  ampLinBuf = Array.from({length:NUM_H}, ()=>[]);
-  ampEmaxTrack = new Array(NUM_H).fill(null);
-  phaseEstBeatHz = new Array(NUM_H).fill(null);
-  updateBeatDisplay();
 });
 
 // Sustain Mode: OFF by default — duration tracking/display fully hidden.
