@@ -474,13 +474,14 @@ function autoScrollToFundamental() {
     if (lo < floor) lo = floor;
     viewLo = lo; viewHi = hi;
   } else {
-    if (currentFreq >= viewLo+margin && currentFreq <= viewHi-margin) return; // already comfortably visible
-    const range = viewHi-viewLo;
-    let lo = currentFreq - margin, hi = lo + range;
-    if (lo < floor) { lo=floor; hi=lo+range; }
-    if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
-    if (lo < floor) lo = floor;
-    viewLo = lo; viewHi = hi;
+    // LIN mode always keeps 0Hz as the bottom of the visible range —
+    // the fundamental is brought into view by extending the TOP of
+    // the range instead of sliding the window, so 0Hz never scrolls
+    // out of sight.
+    if (currentFreq <= viewHi - margin) return; // already comfortably visible with 0 as the floor
+    let hi = Math.min(FREQ_HI, Math.max(viewHi, currentFreq + margin));
+    viewLo = 0;
+    viewHi = hi;
   }
   if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   lastAxisUpdate = 0;
