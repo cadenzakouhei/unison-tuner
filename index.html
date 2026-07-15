@@ -450,43 +450,6 @@ function yToFreq(y, H) {
   }
 }
 
-// When a genuinely new note is confirmed (see renderLoop), shift the
-// visible spectrogram range — WITHOUT changing the current zoom level
-// — so the fundamental (H1) is guaranteed to be on screen, instead of
-// requiring a manual scroll after every new note. Only shifts if the
-// fundamental isn't already comfortably visible, so it doesn't jump
-// around during normal sustained playing within the current view.
-function autoScrollToFundamental() {
-  if (currentFreq === null) return;
-  const floor = logScale ? FREQ_LO : 0;
-  const margin = logScale
-    ? (Math.log2(viewHi) - Math.log2(Math.max(1,viewLo))) * 0.08
-    : (viewHi - viewLo) * 0.08;
-  if (logScale) {
-    const logLo = Math.log2(Math.max(1,viewLo)), logHi = Math.log2(viewHi);
-    const logCur = Math.log2(Math.max(1,currentFreq));
-    if (logCur >= logLo+margin && logCur <= logHi-margin) return; // already comfortably visible
-    const range = logHi-logLo;
-    let newLogLo = logCur - margin, newLogHi = newLogLo + range;
-    let lo = Math.pow(2, newLogLo), hi = Math.pow(2, newLogHi);
-    if (lo < floor) { lo=floor; hi=Math.pow(2, Math.log2(lo)+range); }
-    if (hi > FREQ_HI) { hi=FREQ_HI; lo=Math.pow(2, Math.log2(hi)-range); }
-    if (lo < floor) lo = floor;
-    viewLo = lo; viewHi = hi;
-  } else {
-    // LIN mode always keeps 0Hz as the bottom of the visible range —
-    // the fundamental is brought into view by extending the TOP of
-    // the range instead of sliding the window, so 0Hz never scrolls
-    // out of sight.
-    if (currentFreq <= viewHi - margin) return; // already comfortably visible with 0 as the floor
-    let hi = Math.min(FREQ_HI, Math.max(viewHi, currentFreq + margin));
-    viewLo = 0;
-    viewHi = hi;
-  }
-  if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
-  lastAxisUpdate = 0;
-}
-
 // ── Build UI ───────────────────────────────────────────────
 const hsBtns   = [];
 const beatCards= [];
@@ -632,6 +595,7 @@ swrap.addEventListener("touchmove", e => {
       let lo = viewLo + shift, hi = viewHi + shift;
       if (lo < LIN_FLOOR) { lo=LIN_FLOOR; hi=lo+range; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
+      if (lo < LIN_FLOOR) lo=LIN_FLOOR;
       viewLo=lo; viewHi=hi;
     }
     if (offCtx) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
@@ -1019,7 +983,6 @@ function renderLoop() {
     if (currentFreq===null) {
       currentFreq = freq;
       pendingFreq = null; pendingCount = 0;
-      autoScrollToFundamental();
     } else if (Math.abs(freq-currentFreq)/currentFreq > 0.03) {
       // Candidate "new note" — only accept after it repeats consistently.
       if (pendingFreq !== null && Math.abs(freq-pendingFreq)/pendingFreq < 0.01) {
@@ -1030,7 +993,6 @@ function renderLoop() {
       if (pendingCount >= 4) {
         currentFreq = freq;
         pendingFreq = null; pendingCount = 0;
-        autoScrollToFundamental();
       }
       // While unconfirmed, keep showing the previous stable pitch.
     } else {
