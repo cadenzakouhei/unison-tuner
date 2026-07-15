@@ -647,10 +647,7 @@ swrap.addEventListener("touchend", e => {
       const now = Date.now();
       const dx = t.clientX-lastSpectroTapX, dy = t.clientY-lastSpectroTapY;
       if (now-lastSpectroTapTime <= 350 && (dx*dx+dy*dy) <= (30*30)) {
-        viewLo = logScale ? 10 : 0;
-        viewHi = 4000;
-        if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
-        lastAxisUpdate = 0;
+        resetSpectrogramView();
         lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
       } else {
         lastSpectroTapTime = now; lastSpectroTapX = t.clientX; lastSpectroTapY = t.clientY;
@@ -703,11 +700,8 @@ async function startMic() {
     // backgrounded or whether the OS suspended vs. fully reloaded the
     // page — this is the one action guaranteed to happen at the start
     // of every session, so it's a reliable reset point independent of
-    // unreliable visibilitychange timing in a WKWebView.
-    viewLo = logScale ? 10 : 0;
-    viewHi = 4000;
-    if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
-    lastAxisUpdate = 0;
+    // unreliable visibility/focus timing in a WKWebView.
+    resetSpectrogramView();
     resetLevelHistory();
     const btn = document.getElementById("mic-btn");
     btn.textContent = "🎙 MIC ON"; btn.className = "on";
@@ -728,21 +722,29 @@ function stopMic() {
   resetState();
   resetLevelHistory();
 }
+function resetSpectrogramView() {
+  viewLo = logScale ? 10 : 0;
+  viewHi = 4000;
+  if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+  lastAxisUpdate = 0;
+}
+// iOS commonly resumes a suspended WKWebView instance instead of
+// reloading it, so JS state (including whatever zoom/scroll the
+// spectrogram was left at) can persist silently across an app
+// switch — and standard DOM visibility events are not fully reliable
+// for detecting this inside a Capacitor WKWebView specifically (they
+// were designed for browser-tab visibility, not native app
+// foregrounding, and don't always fire consistently for the latter).
+// Attaching the same reset to several different, redundant signals
+// maximizes the chance that at least one of them actually fires.
 document.addEventListener("visibilitychange", ()=>{
   if (!document.hidden) {
     if (audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
-    // iOS commonly resumes a suspended WKWebView instance instead of
-    // reloading it, so JS state (including whatever zoom/scroll the
-    // spectrogram was left at) can persist silently across an app
-    // switch. Reset to the known-good default range every time the
-    // app comes back to the foreground, so it's never possible to
-    // return to a session that's stuck scrolled somewhere confusing.
-    viewLo = logScale ? 10 : 0;
-    viewHi = 4000;
-    if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
-    lastAxisUpdate = 0;
+    resetSpectrogramView();
   }
 });
+window.addEventListener("pageshow", ()=>{ resetSpectrogramView(); });
+window.addEventListener("focus", ()=>{ resetSpectrogramView(); });
 
 // ── Prevent double-tap-to-zoom across the whole app ────────
 // viewport's user-scalable=no is not always honored by iOS Safari for
