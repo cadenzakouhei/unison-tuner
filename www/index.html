@@ -136,19 +136,6 @@ border-radius: 2px; position: relative;
 }
 .db-tick { position: absolute; right: -18px; font-size: 8px; color: #aaa; transform: translateY(-50%); white-space: nowrap; }
 
-/* Note duration gauge (below the spectrogram) */
-#note-duration-bar {
-background: #1a1a1a; border-top: 1px solid #333; border-bottom: 1px solid #333;
-padding: 4px 10px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-}
-#note-duration-label { font-size: 10px; color: #ccc; letter-spacing: 0.5px; flex-shrink: 0; }
-#note-duration-track {
-flex: 1; height: 8px; background: #000; border-radius: 3px;
-overflow: hidden; border: 1px solid #333; min-width: 0;
-}
-#note-duration-fill { height: 100%; width: 0%; background: linear-gradient(to right, #0a5, #0e8); transition: width 0.1s linear; }
-#note-duration-val { font-size: 11px; color: #ddd; min-width: 48px; text-align: right; flex-shrink: 0; }
-
 /* Beat bar */
 #beat-bar {
 background: #1a1a1a; border-top: 1px solid #333;
@@ -276,12 +263,6 @@ color: #ff8888; font-weight: bold;
   </div>
 </div>
 
-<div id="note-duration-bar">
-  <span id="note-duration-label">DURATION</span>
-  <div id="note-duration-track"><div id="note-duration-fill"></div></div>
-  <span id="note-duration-val">— s</span>
-</div>
-
 <div id="bottom-overlay">
   <div class="section-label">
     <span>Beat Frequency — Selected Harmonics</span>
@@ -401,18 +382,6 @@ const STOP_DB_THRESHOLD  = -75; // reference floor value (manual Stop button is 
 // on/off latch doesn't chatter right at the boundary.
 function timelineOnsetDb() { return -96 + spectroGain; }
 function timelineStopDb()  { return timelineOnsetDb() - 1; }
-
-// Note duration gauge (below the spectrogram): tracks how long the
-// currently-sounding note has been ringing, independent of harmonic
-// selection and Sustain Mode. Onset/stop use the same slow-release
-// held-level technique as the Timeline view (bridges brief dropouts
-// without a real gap), but applied to the overall input level rather
-// than any single harmonic, and fully automatic — no manual Stop
-// needed, since the gauge is meant to just read off elapsed time.
-let globalLevelHeld    = -96;
-let globalNoteOn       = false;
-let globalNoteOnsetTime= null;
-const NOTE_DURATION_GAUGE_MAX_S = 15; // seconds at which the fill bar reaches 100%; the numeric readout keeps counting past this
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let offCanvas=null, offCtx=null;
@@ -1002,22 +971,6 @@ function renderLoop() {
   drawLevelHistoryColumn(peak);
   updateLevelStats(peak);
 
-  // Global note-onset tracking for the duration gauge (see state
-  // comment above). Same slow-release-held-level technique as the
-  // Timeline view's per-harmonic tracking, applied to the overall
-  // input level instead.
-  if (isFinite(peak) && peak > globalLevelHeld) {
-    globalLevelHeld = peak;
-  } else {
-    globalLevelHeld = Math.max(-96, globalLevelHeld - TIMELINE_RELEASE_DB_PER_FRAME);
-  }
-  if (globalLevelHeld >= timelineOnsetDb()) {
-    if (!globalNoteOn) { globalNoteOn = true; globalNoteOnsetTime = performance.now(); }
-  } else if (globalLevelHeld < timelineStopDb()) {
-    globalNoteOn = false; globalNoteOnsetTime = null;
-  }
-  updateNoteDurationGauge();
-
   const freq=detectPitch(fftData,sr,timeData);
   if (freq) {
     // Smooth currentFreq so the H1–H8 guide lines / labels don't jitter
@@ -1270,21 +1223,7 @@ function drawSpectroColumn(binSize) {
     const sampleDb=(b)=>(b>=0&&b<disp.length)?disp[b]:-120;
     const dbLo=sampleDb(bin0), dbHi=sampleDb(bin1);
     const db=dbLo+(dbHi-dbLo)*frac;
-    const dbP1=sampleDb(bin1+1);
-    const dbM1=sampleDb(bin0-1);
-    // Neighbor-bin "bleed" (borrowing brightness from an adjacent bin
-    // when it's louder) must stay a FIXED multiplier here, not scaled
-    // down with zoom: dB values are negative/logarithmic, and
-    // multiplying a very negative value by a *smaller* fraction moves
-    // it *closer to 0* (i.e. makes it look louder, not quieter) — the
-    // opposite of "less bleed". A previous attempt to shrink this
-    // weight at high zoom caused exactly that: near-silent bins were
-    // getting brightened into solid color across the whole screen.
-    // The zoom-dependent thinning above (smoothRadius) is sufficient
-    // and doesn't have this problem, since it averages in linear
-    // amplitude space rather than multiplying dB directly.
-    const dbMax = Math.max(db,dbP1*0.9,dbM1*0.9);
-    const [r,g,b]=dbToRGB(dbMax);
+    const [r,g,b]=dbToRGB(db);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
       d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=255;
@@ -1520,20 +1459,6 @@ function updateLevel(db) {
   document.getElementById("level-db").textContent=isFinite(db)?db.toFixed(1)+" dB":"— dB";
 }
 
-function updateNoteDurationGauge() {
-  const fillEl = document.getElementById("note-duration-fill");
-  const valEl  = document.getElementById("note-duration-val");
-  if (globalNoteOn && globalNoteOnsetTime!==null) {
-    const elapsed = (performance.now() - globalNoteOnsetTime) / 1000;
-    const pct = Math.max(0, Math.min(100, elapsed/NOTE_DURATION_GAUGE_MAX_S*100));
-    fillEl.style.width = pct+"%";
-    valEl.textContent = elapsed.toFixed(1)+" s";
-  } else {
-    fillEl.style.width = "0%";
-    valEl.textContent = "— s";
-  }
-}
-
 // ── Sound level history strip-chart ─────────────────────────
 // Same scrolling technique as the spectrogram: shift the existing
 // canvas contents left by one column each frame, then draw a fresh
@@ -1597,7 +1522,6 @@ function resetState() {
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
-  globalLevelHeld=-96; globalNoteOn=false; globalNoteOnsetTime=null; updateNoteDurationGauge();
   viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
   if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
@@ -1752,3 +1676,4 @@ document.getElementById("btn-sustain-stop").addEventListener("click", function()
 
 </body>
 </html>
+
