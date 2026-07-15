@@ -1369,7 +1369,8 @@ function updateFreqAxisLabels() {
       lbl.className="freq-label";
       lbl.style.top=Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y))+"px";
       lbl.style.color=selH[h]?"rgba(0,255,85,0.95)":"rgba(255,220,100,0.6)";
-      lbl.textContent=`H${h+1} ${hf.toFixed(0)}Hz`;
+      const hfNote=freqToNote(hf);
+      lbl.textContent=hfNote ? `H${h+1} ${hfNote.name} ${hf.toFixed(0)}Hz` : `H${h+1} ${hf.toFixed(0)}Hz`;
       freqAxisEl.appendChild(lbl);
     }
   }
@@ -1439,6 +1440,15 @@ function toggleH(h) {
 }
 
 let displayFreqSmoothed = null;
+// The cents readout used to repaint every single animation frame
+// (~60/sec), which made the number flicker too fast to actually read.
+// Internal pitch smoothing still runs every frame (keeps tracking
+// responsive), but the visible text now only refreshes twice a
+// second, showing the average of everything sampled since the last
+// refresh — a stable, readable number instead of a blur.
+let noteDisplayBuffer = []; // {freq, cents, name} samples collected since the last visible update
+let lastNoteDisplayUpdate = 0;
+const NOTE_DISPLAY_INTERVAL_MS = 500;
 function updateNoteDisplay(freq) {
   const nb=document.getElementById("note-big");
   const ns=document.getElementById("note-sub");
@@ -1449,13 +1459,27 @@ function updateNoteDisplay(freq) {
     displayFreqSmoothed = (displayFreqSmoothed===null) ? freq : displayFreqSmoothed + (freq - displayFreqSmoothed)*0.2;
     const note=freqToNote(displayFreqSmoothed);
     if (note) {
-      nb.textContent=note.name; nb.style.color="#fff";
-      ns.textContent=`${displayFreqSmoothed.toFixed(2)} Hz  ${note.cents>=0?"+":""}${note.cents.toFixed(1)}¢`;
-      ns.style.color="#aaa";
+      noteDisplayBuffer.push({freq:displayFreqSmoothed, cents:note.cents, name:note.name});
+      const nowT = performance.now();
+      if (nowT - lastNoteDisplayUpdate >= NOTE_DISPLAY_INTERVAL_MS) {
+        const avgFreq  = noteDisplayBuffer.reduce((a,v)=>a+v.freq,0)/noteDisplayBuffer.length;
+        const avgCents = noteDisplayBuffer.reduce((a,v)=>a+v.cents,0)/noteDisplayBuffer.length;
+        // Note name uses the most recent sample in the window, so a
+        // note change right at the boundary shows the new name rather
+        // than a meaningless blend of two different notes' names.
+        const dispName = noteDisplayBuffer[noteDisplayBuffer.length-1].name;
+        nb.textContent=dispName; nb.style.color="#fff";
+        ns.textContent=`${avgFreq.toFixed(2)} Hz  ${avgCents>=0?"+":""}${avgCents.toFixed(1)}¢`;
+        ns.style.color="#aaa";
+        noteDisplayBuffer = [];
+        lastNoteDisplayUpdate = nowT;
+      }
       return;
     }
   } else {
     displayFreqSmoothed = null;
+    noteDisplayBuffer = [];
+    lastNoteDisplayUpdate = 0;
   }
   nb.textContent="—"; nb.style.color="#444";
   ns.textContent="— Hz"; ns.style.color="#444";
