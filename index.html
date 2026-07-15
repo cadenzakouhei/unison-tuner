@@ -345,7 +345,7 @@ let harmonicFreqRefined = new Array(NUM_H).fill(null);
 let pendingFreq  = null; // candidate new pitch awaiting confirmation across several frames
 let pendingCount = 0;    // how many consecutive frames have agreed with pendingFreq
 let viewLo       = 0;
-let viewHi       = 4200; // default range matches reference app
+let viewHi       = 4000; // default range matches reference app
 
 // Amplitude envelope peak-interval tracking, per harmonic.
 // We track the dB value of the harmonic each frame, detect local
@@ -526,7 +526,7 @@ function initTimelineCanvas() {
 // Explicitly (re)assert the default view range before the very first
 // canvas init, in case anything touched viewLo/viewHi before this point.
 viewLo = logScale ? 10 : 0;
-viewHi = 4200;
+viewHi = 4000;
 requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }));
 window.addEventListener("resize", ()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); });
 
@@ -638,7 +638,7 @@ swrap.addEventListener("touchend", e => {
   if (e.touches.length === 0) {
     scrollY0=null; pinchDist0=null;
     // Double-tap-to-reset: two quick taps in roughly the same spot on
-    // the spectrogram reset the view to the default 0Hz–4200Hz range.
+    // the spectrogram reset the view to the default 0Hz–4000Hz range.
     // A manual way back in case the view is ever scrolled/zoomed
     // somewhere confusing. Native double-tap-zoom is already disabled
     // app-wide, so this gesture is free to reuse here.
@@ -648,7 +648,7 @@ swrap.addEventListener("touchend", e => {
       const dx = t.clientX-lastSpectroTapX, dy = t.clientY-lastSpectroTapY;
       if (now-lastSpectroTapTime <= 350 && (dx*dx+dy*dy) <= (30*30)) {
         viewLo = logScale ? 10 : 0;
-        viewHi = 4200;
+        viewHi = 4000;
         if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
         lastAxisUpdate = 0;
         lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
@@ -698,6 +698,16 @@ async function startMic() {
     }
     document.getElementById("sr-label").textContent = audioCtx.sampleRate+" Hz";
     micOn = true;
+    // Reset the spectrogram view to the default range every time the
+    // mic is turned on, regardless of how long the app was
+    // backgrounded or whether the OS suspended vs. fully reloaded the
+    // page — this is the one action guaranteed to happen at the start
+    // of every session, so it's a reliable reset point independent of
+    // unreliable visibilitychange timing in a WKWebView.
+    viewLo = logScale ? 10 : 0;
+    viewHi = 4000;
+    if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
+    lastAxisUpdate = 0;
     resetLevelHistory();
     const btn = document.getElementById("mic-btn");
     btn.textContent = "🎙 MIC ON"; btn.className = "on";
@@ -728,7 +738,7 @@ document.addEventListener("visibilitychange", ()=>{
     // app comes back to the foreground, so it's never possible to
     // return to a session that's stuck scrolled somewhere confusing.
     viewLo = logScale ? 10 : 0;
-    viewHi = 4200;
+    viewHi = 4000;
     if (offCtx && offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
     lastAxisUpdate = 0;
   }
@@ -1569,7 +1579,7 @@ function resetState() {
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
-  viewLo=logScale?10:0; viewHi=4200;
+  viewLo=logScale?10:0; viewHi=4000;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
   if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
 }
@@ -1663,7 +1673,7 @@ document.getElementById("scale-toggle").addEventListener("click", function() {
   document.getElementById("scale-knob").style.left=logScale?"2px":"18px";
   // Reset view range on scale-mode switch so leftover zoom/scroll from
   // the other mode doesn't carry over and confuse the new scale.
-  viewLo=logScale?10:0; viewHi=4200;
+  viewLo=logScale?10:0; viewHi=4000;
   if (offCtx&&offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
