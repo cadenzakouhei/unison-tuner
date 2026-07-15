@@ -1416,6 +1416,7 @@ let displayFreqSmoothed = null;
 // refresh — a stable, readable number instead of a blur.
 let noteDisplayBuffer = []; // {freq, cents, name} samples collected since the last visible update
 let lastNoteDisplayUpdate = 0;
+let lastDisplayedNoteName = null; // detects a genuine note change so it can be shown immediately
 const NOTE_DISPLAY_INTERVAL_MS = 500;
 function updateNoteDisplay(freq) {
   const nb=document.getElementById("note-big");
@@ -1427,6 +1428,15 @@ function updateNoteDisplay(freq) {
     displayFreqSmoothed = (displayFreqSmoothed===null) ? freq : displayFreqSmoothed + (freq - displayFreqSmoothed)*0.2;
     const note=freqToNote(displayFreqSmoothed);
     if (note) {
+      // A genuine note change must show up right away, not wait out
+      // the rest of the current 0.5s window blended with leftover
+      // samples from the previous note — that made a freshly-struck
+      // note look like it was still showing the last one for up to
+      // half a second.
+      if (note.name !== lastDisplayedNoteName) {
+        noteDisplayBuffer = [];
+        lastNoteDisplayUpdate = 0;
+      }
       noteDisplayBuffer.push({freq:displayFreqSmoothed, cents:note.cents, name:note.name});
       const nowT = performance.now();
       if (nowT - lastNoteDisplayUpdate >= NOTE_DISPLAY_INTERVAL_MS) {
@@ -1439,6 +1449,7 @@ function updateNoteDisplay(freq) {
         nb.textContent=dispName; nb.style.color="#fff";
         ns.textContent=`${avgFreq.toFixed(2)} Hz  ${avgCents>=0?"+":""}${avgCents.toFixed(1)}¢`;
         ns.style.color="#aaa";
+        lastDisplayedNoteName = dispName;
         noteDisplayBuffer = [];
         lastNoteDisplayUpdate = nowT;
       }
@@ -1448,6 +1459,7 @@ function updateNoteDisplay(freq) {
     displayFreqSmoothed = null;
     noteDisplayBuffer = [];
     lastNoteDisplayUpdate = 0;
+    lastDisplayedNoteName = null;
   }
   nb.textContent="—"; nb.style.color="#444";
   ns.textContent="— Hz"; ns.style.color="#444";
@@ -1676,4 +1688,3 @@ document.getElementById("btn-sustain-stop").addEventListener("click", function()
 
 </body>
 </html>
-
