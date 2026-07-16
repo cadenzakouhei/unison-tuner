@@ -296,7 +296,6 @@ color: #ff8888; font-weight: bold;
   <div class="section-label">
     <span>Sound Level</span>
     <div id="level-history-stats">
-      <span>MIN <b id="lvl-min" style="color:#4af">— dB</b></span>
       <span>AVG <b id="lvl-avg" style="color:#8f8">— dB</b></span>
       <span>MAX <b id="lvl-max" style="color:#f66">— dB</b></span>
     </div>
@@ -391,7 +390,9 @@ let blackmanWin = null;
 // Sound level history strip-chart state
 const levelHistCanvas = document.getElementById("level-history-canvas");
 const levelHistCtx    = levelHistCanvas.getContext("2d");
-let levelMin=null, levelMax=null, levelSum=0, levelCount=0;
+let levelSum=0, levelCount=0; // AVG: unchanged, accumulates across the whole session
+let levelMaxCurrent=null;     // MAX: peak level of just the most recent key strike, reset on each new onset
+let levelHeld=-96, levelStrikeOn=false; // slow-release held level, used only to detect strike onset/offset
 
 // ── Colour map (matches reference app exactly) ─────────────
 // Reference: background=cyan(-60dB), signal=yellow-red(-40~0dB)
@@ -1587,24 +1588,33 @@ function drawLevelHistoryColumn(db) {
 }
 function updateLevelStats(db) {
   if (!isFinite(db)) return;
-  if (levelMin===null || db<levelMin) levelMin=db;
-  if (levelMax===null || db>levelMax) levelMax=db;
   levelSum += db; levelCount++;
-  // levelMin/levelMax are tracked in raw (negative) dB, where more
-  // negative means quieter. Taking the absolute value for display
-  // flips which one is numerically bigger — the quietest moment
-  // (levelMin) turns into the largest number. Assign the smaller/
-  // larger of the two absolute values to the MIN/MAX labels
-  // respectively, so what's shown stays in the order the labels
-  // imply (MIN ≤ MAX) instead of visually flipping.
-  const absA = Math.abs(levelMin), absB = Math.abs(levelMax);
-  document.getElementById("lvl-min").textContent = Math.min(absA, absB).toFixed(1)+" dB";
-  document.getElementById("lvl-max").textContent = Math.max(absA, absB).toFixed(1)+" dB";
   document.getElementById("lvl-avg").textContent = Math.abs(levelSum/levelCount).toFixed(1)+" dB";
+
+  // MAX: peak of just the current key strike, not an all-time running
+  // max. Uses the same slow-release held-level technique as the
+  // Timeline view to detect strike onset/offset (bridges brief
+  // detection dropouts without a real gap): the moment a NEW strike
+  // is detected (level crosses the onset threshold after having been
+  // below the stop threshold), the tracked peak resets and starts
+  // fresh, so MAX always answers "how loud was that last hit" rather
+  // than accumulating across the whole session.
+  if (db > levelHeld) levelHeld = db;
+  else levelHeld = Math.max(-96, levelHeld - TIMELINE_RELEASE_DB_PER_FRAME);
+  if (levelHeld >= timelineOnsetDb()) {
+    if (!levelStrikeOn) { levelStrikeOn = true; levelMaxCurrent = null; }
+  } else if (levelHeld < timelineStopDb()) {
+    levelStrikeOn = false;
+  }
+  if (levelStrikeOn) {
+    levelMaxCurrent = (levelMaxCurrent===null) ? db : Math.max(levelMaxCurrent, db);
+  }
+  if (levelMaxCurrent !== null) {
+    document.getElementById("lvl-max").textContent = Math.abs(levelMaxCurrent).toFixed(1)+" dB";
+  }
 }
 function resetLevelHistory() {
-  levelMin=null; levelMax=null; levelSum=0; levelCount=0;
-  document.getElementById("lvl-min").textContent="— dB";
+  levelSum=0; levelCount=0; levelMaxCurrent=null; levelHeld=-96; levelStrikeOn=false;
   document.getElementById("lvl-max").textContent="— dB";
   document.getElementById("lvl-avg").textContent="— dB";
   if (levelHistCtx && levelHistCanvas.width) {
