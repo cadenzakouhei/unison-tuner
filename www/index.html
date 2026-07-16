@@ -659,6 +659,7 @@ swrap.addEventListener("touchend", e => {
       if (now-lastSpectroTapTime <= 350 && (dx*dx+dy*dy) <= (30*30)) {
         resetSpectrogramView();
         resetSustainTimers();
+        resetLevelHistory();
         updateBeatDisplay();
         lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
       } else {
