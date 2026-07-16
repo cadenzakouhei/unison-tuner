@@ -189,7 +189,12 @@ color: #ff8888; font-weight: bold;
 #level-history-section { flex-shrink: 0; display: flex; flex-direction: column; }
 #level-history-stats { display: flex; gap: 12px; font-size: 10px; color: #ccc; }
 #level-history-stats b { font-size: 12px; }
-#level-history-wrap { height: 336px; position: relative; background: #000; flex-shrink: 0; }
+#level-history-wrap { height: 336px; position: relative; background: #000; flex-shrink: 0; display: flex; }
+#level-ruler {
+width: 52px; flex-shrink: 0; position: relative;
+background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
+}
+#level-canvas-wrap { flex: 1; position: relative; overflow: hidden; }
 #level-history-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 
 </style>
@@ -301,7 +306,10 @@ color: #ff8888; font-weight: bold;
     </div>
   </div>
   <div id="level-history-wrap">
-    <canvas id="level-history-canvas"></canvas>
+    <div id="level-ruler"></div>
+    <div id="level-canvas-wrap">
+      <canvas id="level-history-canvas"></canvas>
+    </div>
   </div>
 </div>
 
@@ -511,6 +519,7 @@ function initLevelHistCanvas() {
   levelHistCanvas.style.height = h + "px";
   levelHistCtx.fillStyle = "#000";
   levelHistCtx.fillRect(0, 0, levelHistCanvas.width, levelHistCanvas.height);
+  updateLevelRulerLabels();
 }
 function initTimelineCanvas() {
   const dpr  = window.devicePixelRatio || 1;
@@ -1569,6 +1578,37 @@ function dbToLevelScale(db) {
   return Math.max(0, db + 96);
 }
 
+// Sound Level graph's left-side ruler: labeled 20–120 in steps of 20,
+// on the same floor-relative scale as dbToLevelScale. The achievable
+// maximum (full-scale raw signal) only reaches 96, so 100/120 sit in
+// a deliberate headroom band at the top of the chart — same idea as
+// the headroom above 0dBFS on a hardware level meter.
+const LEVEL_SCALE_MIN = 0, LEVEL_SCALE_MAX = 120, LEVEL_SCALE_STEP = 20;
+function levelToY(levelVal, H) {
+  return H * (1 - (levelVal - LEVEL_SCALE_MIN) / (LEVEL_SCALE_MAX - LEVEL_SCALE_MIN));
+}
+const levelRulerEl = document.getElementById("level-ruler");
+function updateLevelRulerLabels() {
+  if (!levelRulerEl) return;
+  levelRulerEl.innerHTML = "";
+  const H = levelHistCanvas.clientHeight || 300;
+  if (H < 10) return;
+  const LABEL_MARGIN = 9;
+  for (let g=LEVEL_SCALE_MIN; g<=LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) {
+    const y = levelToY(g, H);
+    const clampedY = Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y));
+    const tick=document.createElement("div");
+    tick.className="ruler-tick";
+    tick.style.top=clampedY+"px";
+    levelRulerEl.appendChild(tick);
+    const lbl=document.createElement("div");
+    lbl.className="ruler-label";
+    lbl.style.top=clampedY+"px";
+    lbl.textContent=g+"dB";
+    levelRulerEl.appendChild(lbl);
+  }
+}
+
 function updateLevel(db) {
   const pct=Math.max(0,Math.min(100,(db+96)/96*100));
   document.getElementById("level-bar").style.width=pct+"%";
@@ -1599,17 +1639,18 @@ function drawLevelHistoryColumn(db) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   levelHistCtx.fillStyle="#000";
   levelHistCtx.fillRect(colX,0,colW,H);
-  // Faint reference gridlines every 24dB (0, -24, -48, -72, -96)
+  // Faint reference gridlines every 20dB, matching the left-side ruler
   levelHistCtx.strokeStyle="rgba(255,255,255,0.08)";
   levelHistCtx.lineWidth=dpr;
-  for (let g=0; g>=-96; g-=24) {
-    const y = H*(1-(g+96)/96);
+  for (let g=LEVEL_SCALE_MIN; g<=LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) {
+    const y = levelToY(g, H);
     levelHistCtx.beginPath(); levelHistCtx.moveTo(colX,y); levelHistCtx.lineTo(colX+colW,y); levelHistCtx.stroke();
   }
-  const pct = Math.max(0, Math.min(1, ((isFinite(db)?db:-96)+96)/96));
-  const barH = pct*H;
+  const levelVal = dbToLevelScale(isFinite(db)?db:-96);
+  const barTopY = levelToY(levelVal, H);
+  const barH = H - barTopY;
   levelHistCtx.fillStyle = levelToColor(db);
-  levelHistCtx.fillRect(colX, H-barH, colW, barH);
+  levelHistCtx.fillRect(colX, barTopY, colW, barH);
 }
 function updateLevelStats(db) {
   if (!isFinite(db)) return;
