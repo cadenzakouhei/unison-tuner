@@ -841,7 +841,14 @@ function refineFreqGoertzel(samples, win, sr, freqGuess, binSize) {
 function detectPitch(data, sr, timeSamples) {
   const binSize = sr / FFT_SIZE;
   const lo = Math.floor(27.5/binSize);
-  const hi = Math.min(Math.floor(2000/binSize), data.length-1);
+  // Search up to C8 (~4200Hz, the top of the piano), not just 2000Hz —
+  // any note whose fundamental sits above 2000Hz (roughly B6 and up)
+  // was previously impossible to detect at all, since maxBin could
+  // never even be considered above that ceiling. This is what made
+  // C6-and-above register detection unreliable: notes right at or
+  // above the old cutoff would fail outright rather than just being
+  // less accurate.
+  const hi = Math.min(Math.floor(4500/binSize), data.length-1);
   const lin= new Float32Array(data.length);
   for (let i=0; i<data.length; i++) lin[i]=Math.pow(10, data[i]/20);
   let maxVal=0, maxBin=0;
@@ -1583,9 +1590,9 @@ function updateLevelStats(db) {
   if (levelMin===null || db<levelMin) levelMin=db;
   if (levelMax===null || db>levelMax) levelMax=db;
   levelSum += db; levelCount++;
-  document.getElementById("lvl-min").textContent = levelMin.toFixed(1)+" dB";
-  document.getElementById("lvl-max").textContent = levelMax.toFixed(1)+" dB";
-  document.getElementById("lvl-avg").textContent = (levelSum/levelCount).toFixed(1)+" dB";
+  document.getElementById("lvl-min").textContent = Math.abs(levelMin).toFixed(1)+" dB";
+  document.getElementById("lvl-max").textContent = Math.abs(levelMax).toFixed(1)+" dB";
+  document.getElementById("lvl-avg").textContent = Math.abs(levelSum/levelCount).toFixed(1)+" dB";
 }
 function resetLevelHistory() {
   levelMin=null; levelMax=null; levelSum=0; levelCount=0;
