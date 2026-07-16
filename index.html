@@ -1590,8 +1590,16 @@ function updateLevelStats(db) {
   if (levelMin===null || db<levelMin) levelMin=db;
   if (levelMax===null || db>levelMax) levelMax=db;
   levelSum += db; levelCount++;
-  document.getElementById("lvl-min").textContent = Math.abs(levelMin).toFixed(1)+" dB";
-  document.getElementById("lvl-max").textContent = Math.abs(levelMax).toFixed(1)+" dB";
+  // levelMin/levelMax are tracked in raw (negative) dB, where more
+  // negative means quieter. Taking the absolute value for display
+  // flips which one is numerically bigger — the quietest moment
+  // (levelMin) turns into the largest number. Assign the smaller/
+  // larger of the two absolute values to the MIN/MAX labels
+  // respectively, so what's shown stays in the order the labels
+  // imply (MIN ≤ MAX) instead of visually flipping.
+  const absA = Math.abs(levelMin), absB = Math.abs(levelMax);
+  document.getElementById("lvl-min").textContent = Math.min(absA, absB).toFixed(1)+" dB";
+  document.getElementById("lvl-max").textContent = Math.max(absA, absB).toFixed(1)+" dB";
   document.getElementById("lvl-avg").textContent = Math.abs(levelSum/levelCount).toFixed(1)+" dB";
 }
 function resetLevelHistory() {
