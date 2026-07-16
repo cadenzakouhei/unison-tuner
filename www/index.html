@@ -1077,7 +1077,6 @@ function renderLoop() {
       currentFreq = currentFreq + (freq-currentFreq)*0.12;
       pendingFreq = null; pendingCount = 0;
     }
-    updateNoteDisplay(currentFreq);
   }
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
@@ -1190,6 +1189,13 @@ function renderLoop() {
       }
     }
   }
+  // Snap the top-left note/cents display to the actual spectral peak
+  // (harmonicFreqRefined[0], the same H1 position the in-graph tag
+  // uses) rather than the raw smoothed pitch estimate — a note
+  // sitting near the midpoint between two semitones was otherwise
+  // able to show a different reading up top than what the tag below
+  // it (which snaps to the real peak) displayed.
+  updateNoteDisplay(harmonicFreqRefined[0]!==null && harmonicFreqRefined[0]!==undefined ? harmonicFreqRefined[0] : currentFreq);
   if (viewMode === 'spec') {
     drawSpectroColumn(binSize);
   } else {
@@ -1385,6 +1391,9 @@ function updateFreqAxisLabels() {
     // lanes by harmonic number, independent of the note's actual
     // pitch. No edge-clamping here (unlike the frequency ruler): with
     // a fixed lane grid every label sits exactly at its lane's center.
+    // Labels are left-aligned (instead of the frequency ruler's
+    // right-alignment) with the note name appended after the H-number,
+    // so each lane reads "H1 D3" etc.
     const laneH = H/NUM_H;
     for (let h=0; h<NUM_H; h++) {
       const rowFromTop = NUM_H-1-h;
@@ -1392,7 +1401,11 @@ function updateFreqAxisLabels() {
       const lbl=document.createElement("div");
       lbl.className="ruler-label";
       lbl.style.top=y+"px";
-      lbl.textContent="H"+(h+1);
+      lbl.style.left="4px";
+      lbl.style.right="auto";
+      const hf = harmonicFreqRefined[h];
+      const note = hf ? freqToNote(hf) : null;
+      lbl.textContent = note ? ("H"+(h+1)+" "+note.name) : ("H"+(h+1));
       freqRulerEl.appendChild(lbl);
     }
     return;
