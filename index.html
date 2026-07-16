@@ -658,6 +658,8 @@ swrap.addEventListener("touchend", e => {
       const dx = t.clientX-lastSpectroTapX, dy = t.clientY-lastSpectroTapY;
       if (now-lastSpectroTapTime <= 350 && (dx*dx+dy*dy) <= (30*30)) {
         resetSpectrogramView();
+        resetSustainTimers();
+        updateBeatDisplay();
         lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
       } else {
         lastSpectroTapTime = now; lastSpectroTapX = t.clientX; lastSpectroTapY = t.clientY;
@@ -1779,19 +1781,21 @@ document.getElementById("view-toggle").addEventListener("click", function() {
 // time is only frozen when the person taps the Stop button (manual,
 // since deciding "the sound has died out" is a judgment call better
 // left to the ear than a fixed dB floor).
+function resetSustainTimers() {
+  // Clears all in-progress/frozen sustain timers so nothing stale is
+  // left waiting. Used both when Sustain Mode is turned off and when
+  // the spectrogram view is double-tap-reset.
+  noteIsActive = new Array(NUM_H).fill(false);
+  noteOnsetTime = new Array(NUM_H).fill(null);
+  noteDuration = new Array(NUM_H).fill(null);
+  hysteresisOn = new Array(NUM_H).fill(false);
+}
 document.getElementById("sustain-toggle").addEventListener("click", function() {
   sustainMode = !sustainMode;
   this.style.background = sustainMode ? "#2255aa" : "#333";
   document.getElementById("sustain-knob").style.left = sustainMode ? "18px" : "2px";
   document.getElementById("btn-sustain-stop").style.display = sustainMode ? "inline-block" : "none";
-  if (!sustainMode) {
-    // Turning sustain mode off clears all in-progress/frozen timers so
-    // nothing stale is waiting when it's turned back on later.
-    noteIsActive = new Array(NUM_H).fill(false);
-    noteOnsetTime = new Array(NUM_H).fill(null);
-    noteDuration = new Array(NUM_H).fill(null);
-    hysteresisOn = new Array(NUM_H).fill(false);
-  }
+  if (!sustainMode) resetSustainTimers();
   updateBeatDisplay();
 });
 
