@@ -870,7 +870,33 @@ function detectPitch(data, sr, timeSamples) {
               *lin[Math.min(i*4,data.length-1)]*lin[Math.min(i*5,data.length-1)];
     if (v>maxVal) { maxVal=v; maxBin=i; }
   }
-  if (maxBin===0 || data[maxBin]<-72) return null;
+  // Missing-fundamental fallback (harmonic SUM instead of product):
+  // the lowest piano notes (roughly G#1 / ~52Hz and below) commonly
+  // have almost no energy at the fundamental itself — the ear still
+  // perceives the correct pitch from the harmonic series alone
+  // ("virtual pitch"/missing fundamental), but the multiplicative
+  // search above requires real energy AT the candidate frequency
+  // itself, so a genuinely near-silent fundamental bin zeroes out the
+  // whole product there and the true candidate never wins. This is
+  // only tried when the normal search above found nothing usable, and
+  // only accepted if at least 5 of its first 8 harmonics show real
+  // energy, so it can't latch onto noise.
+  let usedMissingFundamentalFallback = false;
+  if (maxBin===0 || data[maxBin]<-72) {
+    const shsLo = Math.max(1, Math.floor(20/binSize));
+    const shsHi = Math.floor(85/binSize);
+    let shsBest=-1, shsBestSum=0;
+    for (let i=shsLo; i<=shsHi; i++) {
+      let sum=0, coherent=0;
+      for (let m=1; m<=8; m++) {
+        const bin = Math.min(i*m, data.length-1);
+        if (data[bin] > -80) { sum += lin[bin]; coherent++; }
+      }
+      if (coherent>=5 && sum>shsBestSum) { shsBestSum=sum; shsBest=i; }
+    }
+    if (shsBest>0) { maxBin = shsBest; usedMissingFundamentalFallback = true; }
+  }
+  if (maxBin===0 || (data[maxBin]<-72 && !usedMissingFundamentalFallback)) return null;
 
   // --- オクターブ/倍音ロック補正 ---
   // 低音では基音binのエネルギーが弱く、強い倍音位置がHPSで
@@ -883,22 +909,30 @@ function detectPitch(data, sr, timeSamples) {
   //    十分近い強度を持つ場合のみ「独立した基音」とみなす
   //  - 最低4本の倍音が観測できる場合のみ判定（統計的信頼性の確保）
   //  - 一致率のしきい値を厳しくする (0.6 → 0.85)
-  const maxBinDb = data[maxBin];
-  let correctedBin = maxBin;
-  for (let k=2; k<=6; k++) {
-    const subBin = Math.round(maxBin/k);
-    if (subBin < lo) continue;
-    // 候補の基音binが、検出された最強ピークと比べて明らかに弱い場合は
-    // 対象外（ノイズやサイドローブの可能性が高い）。
-    if (data[subBin] < maxBinDb - 20) continue;
-    let coherent=0, total=0;
-    for (let m=1; m*subBin<=hi && m<=8; m++) {
-      total++;
-      if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
+  // Skipped entirely when the missing-fundamental fallback above was
+  // used: that path already found the true fundamental via a
+  // purpose-built method, and this correction step assumes a
+  // normally (product-)detected maxBin, which doesn't apply here —
+  // running it anyway risked "correcting" an already-correct low
+  // note even further down.
+  if (!usedMissingFundamentalFallback) {
+    const maxBinDb = data[maxBin];
+    let correctedBin = maxBin;
+    for (let k=2; k<=6; k++) {
+      const subBin = Math.round(maxBin/k);
+      if (subBin < lo) continue;
+      // 候補の基音binが、検出された最強ピークと比べて明らかに弱い場合は
+      // 対象外（ノイズやサイドローブの可能性が高い）。
+      if (data[subBin] < maxBinDb - 20) continue;
+      let coherent=0, total=0;
+      for (let m=1; m*subBin<=hi && m<=8; m++) {
+        total++;
+        if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
+      }
+      if (total>=4 && coherent/total >= 0.85) { correctedBin = subBin; break; }
     }
-    if (total>=4 && coherent/total >= 0.85) { correctedBin = subBin; break; }
+    maxBin = correctedBin;
   }
-  maxBin = correctedBin;
 
   // 粗い推定値（パラボリック補間）
   const prev=maxBin>0?lin[maxBin-1]:lin[maxBin];
@@ -923,7 +957,15 @@ function detectPitch(data, sr, timeSamples) {
 function refineHarmonicFreq(data, sr, theoreticalFreq, h) {
   if (!theoreticalFreq) return null;
   const binSize = sr/FFT_SIZE;
-  const tolHz = Math.max(binSize*3, theoreticalFreq*(0.004+h*0.0035));
+  // Real piano strings are inharmonic, and the sharpening grows
+  // roughly with the SQUARE of the harmonic number (stiff-string /
+  // Railsback-style stretch), not linearly. A window that only grew
+  // linearly with h was too narrow for the higher harmonics (H6-H8)
+  // — especially in the 2-4kHz range, common for the upper harmonics
+  // of ordinary mid-register notes — so it could miss the true,
+  // further-shifted peak entirely and fall back to the unshifted
+  // theoretical position instead.
+  const tolHz = Math.max(binSize*3, theoreticalFreq*(0.004+(h+1)*(h+1)*0.0005));
   const cBin = Math.round(theoreticalFreq/binSize);
   const wBins = Math.max(2, Math.round(tolHz/binSize));
   const s = Math.max(1, cBin-wBins), e = Math.min(data.length-2, cBin+wBins);
