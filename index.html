@@ -285,6 +285,10 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
       <span class="ctrl-label">GAIN</span>
       <input type="range" id="sl-gain" min="10" max="90" step="1" value="20">
       <span class="ctrl-val" id="vl-gain">20 dB</span>
+      <span id="agc-label" style="font-size:10px;color:#ccc;flex-shrink:0;">AGC</span>
+      <div id="agc-toggle" class="toggle-switch" style="background:#2255aa;">
+        <div id="agc-knob" class="toggle-knob" style="left:18px;"></div>
+      </div>
     </div>
     <div class="ctrl-row">
       <span class="ctrl-label">A4 REF</span>
@@ -329,6 +333,7 @@ const REF_PITCH_STEP    = 0.1;
 
 // ── Mutable state ──────────────────────────────────────────
 let micOn        = false;
+let agcEnabled   = true; // mic-level Automatic Gain Control (distinct from the GAIN slider below, which only affects spectrogram color/brightness) — defaults on to match the reference app
 let gainVal      = 5.0;
 let spectroGain  = 20;  // match reference app 20.3dB
 let refPitch     = REF_PITCH_DEFAULT;
@@ -705,7 +710,7 @@ async function startMic() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) { alert("Web Audio API not supported."); return; }
     stream   = await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}
+      audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:agcEnabled}
     });
     audioCtx = new AC({sampleRate:44100});
     if (audioCtx.state==="suspended") await audioCtx.resume();
@@ -1749,6 +1754,24 @@ function resetState() {
 document.getElementById("sl-gain").addEventListener("input", function() {
   spectroGain=parseInt(this.value);
   document.getElementById("vl-gain").textContent=spectroGain+" dB";
+});
+
+// AGC: mic-level Automatic Gain Control, independent of the GAIN
+// slider above (which only affects spectrogram color/brightness).
+// Applied live via applyConstraints() if the mic is already running,
+// so no restart is needed; otherwise the new value is simply picked
+// up the next time startMic() runs.
+document.getElementById("agc-toggle").addEventListener("click", async function() {
+  agcEnabled = !agcEnabled;
+  this.style.background = agcEnabled ? "#2255aa" : "#333";
+  document.getElementById("agc-knob").style.left = agcEnabled ? "18px" : "2px";
+  if (stream) {
+    const track = stream.getAudioTracks()[0];
+    if (track && track.applyConstraints) {
+      try { await track.applyConstraints({autoGainControl: agcEnabled}); }
+      catch(e) { /* live constraint change not supported on this device — takes effect next MIC ON instead */ }
+    }
+  }
 });
 
 // A4 reference pitch: button-based ±0.1Hz stepper (420–450Hz range,
