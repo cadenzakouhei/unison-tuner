@@ -915,7 +915,16 @@ function detectPitch(data, sr, timeSamples) {
   // normally (product-)detected maxBin, which doesn't apply here —
   // running it anyway risked "correcting" an already-correct low
   // note even further down.
-  if (!usedMissingFundamentalFallback) {
+  // Restricted to the low register (below ~300Hz, roughly D4 and
+  // under): this correction exists for cases where a bass note's own
+  // fundamental is weak and a strong overtone gets mistaken for it.
+  // Applying it higher up caused a different problem instead — high
+  // notes normally have a strong, correctly-detected fundamental
+  // already, but real sympathetic/soundboard resonance at the octave
+  // below (very common on real pianos) could give the k=2 candidate
+  // just enough coherent, in-range energy to pass the checks below,
+  // incorrectly pulling notes like A5 and above down an octave.
+  if (!usedMissingFundamentalFallback && maxBin*binSize < 300) {
     const maxBinDb = data[maxBin];
     let correctedBin = maxBin;
     for (let k=2; k<=6; k++) {
