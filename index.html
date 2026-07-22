@@ -235,7 +235,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <div id="view-toggle" class="toggle-switch">
       <div id="view-knob" class="toggle-knob"></div>
     </div>
-    <span id="sr-label" style="font-size:10px;color:#ccc;">44100 Hz</span>
+    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">44100 Hz</button>
   </div>
 </div>
 
@@ -334,6 +334,8 @@ const REF_PITCH_STEP    = 0.1;
 // ── Mutable state ──────────────────────────────────────────
 let micOn        = false;
 let agcEnabled   = true; // mic-level Automatic Gain Control (distinct from the GAIN slider below, which only affects spectrogram color/brightness) — defaults on to match the reference app
+const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050, 44100];
+let targetSampleRate = 44100; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
 let spectroGain  = 20;  // match reference app 20.3dB
 let refPitch     = REF_PITCH_DEFAULT;
@@ -712,7 +714,7 @@ async function startMic() {
     stream   = await navigator.mediaDevices.getUserMedia({
       audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:agcEnabled}
     });
-    audioCtx = new AC({sampleRate:44100});
+    audioCtx = new AC({sampleRate:targetSampleRate});
     if (audioCtx.state==="suspended") await audioCtx.resume();
     gainNode = audioCtx.createGain();
     gainNode.gain.value = gainVal;
@@ -1771,6 +1773,21 @@ document.getElementById("agc-toggle").addEventListener("click", async function()
       try { await track.applyConstraints({autoGainControl: agcEnabled}); }
       catch(e) { /* live constraint change not supported on this device — takes effect next MIC ON instead */ }
     }
+  }
+});
+
+// Sample rate: AudioContext sample rate is fixed at creation, so
+// changing it restarts the mic if it's currently on. Lower rates cap
+// the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means
+// nothing above 4000Hz can be captured at all, trading high-register
+// analysis for a smaller/faster pipeline.
+document.getElementById("sr-label").addEventListener("click", async function() {
+  const idx = SAMPLE_RATE_OPTIONS.indexOf(targetSampleRate);
+  targetSampleRate = SAMPLE_RATE_OPTIONS[(idx+1) % SAMPLE_RATE_OPTIONS.length];
+  this.textContent = targetSampleRate + " Hz";
+  if (micOn) {
+    stopMic();
+    await startMic();
   }
 });
 
