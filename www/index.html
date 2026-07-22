@@ -1307,27 +1307,24 @@ function renderLoop() {
 }
 
 // ── Spectrogram ────────────────────────────────────────────
-// ── 表示用の周波数方向スムージング ─────────────────────────
-// 生のFFTビンをそのまま1ピクセル行に対応させると、ビン幅が画面の
-// ピクセル密度より細かい場合に線が1〜2pxしかない細い表示になる。
-// リニア(振幅)領域で複数ビンにわたる重み付き移動平均をかけることで、
-// ピーク自体の高さはほぼ保ったまま、視覚的な帯の太さを参考アプリ
-// 相当(数px〜十数px)に広げる。dB領域で平均すると弱い側に引っ張られて
-// ピークが鈍るため、必ずリニア領域で計算してからdBに戻す。
-const SMOOTH_RADIUS = 6; // ±6 bin (13-tap) — used at normal/zoomed-out view; shrinks automatically when zoomed in (see estimatePixelsPerBin)
-function smoothFreqDataForDisplay(data, radius) {
-  const n = data.length;
-  const out = new Float32Array(n);
-  for (let i=0; i<n; i++) {
-    let sum=0, wsum=0;
-    const s=Math.max(0,i-radius), e=Math.min(n-1,i+radius);
-    for (let j=s; j<=e; j++) {
-      const w = radius>0 ? 1 - Math.abs(j-i)/(radius+1) : 1;
-      sum += Math.pow(10, data[j]/20) * w;
-      wsum += w;
-    }
-    const avgLin = wsum>0 ? sum/wsum : 1e-12;
-    out[i] = 20*Math.log10(Math.max(avgLin, 1e-12));
+// ── 表示用の周波数方向ブロック集約 ─────────────────────────
+// 以前は±数ビンの重み付き移動平均で帯を太らせていたが、これは画面
+// 全体を柔らかくぼかす副作用があり、参考アプリのシャープで粒状感の
+// ある見た目と乖離していた。参考アプリの「太いのに鮮明」な描写は、
+// 実質的に粗いFFT解像度(大きなビン幅)で描いているのに近い。そこで
+// 平滑化ではなく「隣接AGGビンをリニア領域で1セルに集約」する方式に
+// 変更: 帯の太さはセル幅で確保しつつ、セル間はなだらかに補間する
+// だけなので広範囲のボケが発生せず、ノイズフロアの粒状感も残る。
+const DISPLAY_AGG = 3; // 集約するビン数(≒実効ビン幅 16Hz)。ズームイン時は自動的に1(生ビン)へ切替
+function aggregateForDisplay(data, A) {
+  const nOut = Math.ceil(data.length / A);
+  const out = new Float32Array(nOut);
+  for (let b=0; b<nOut; b++) {
+    let sum=0, cnt=0;
+    const s=b*A, e=Math.min(data.length, s+A);
+    for (let j=s; j<e; j++) { sum += Math.pow(10, data[j]/20); cnt++; }
+    const avgLin = cnt>0 ? sum/cnt : 1e-12;
+    out[b] = 20*Math.log10(Math.max(avgLin, 1e-12));
   }
   return out;
 }
@@ -1364,51 +1361,33 @@ function drawSpectroColumn(binSize) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
-  // In LIN mode, pixel-per-Hz density is the same everywhere in the
-  // visible range, so one global smoothing radius (from the view's
-  // midpoint) is accurate for every row and only needs computing
-  // once. In LOG mode, density varies strongly with frequency — the
-  // same Hz-wide bin spans far more screen pixels near the bottom of
-  // the view than near the top — so using one global radius made the
-  // band look thick in the bass and thin in the treble regardless of
-  // overall zoom level. Precomputing all three smoothing tiers once
-  // per column (cheap: each is a single O(bins) pass) and picking the
-  // right one PER ROW, based on that row's own local pixel-per-bin
-  // density, keeps the band thickness consistent across the whole
-  // register in LOG mode too.
-  let dispTiers=null, dispLin=null;
-  if (logScale) {
-    dispTiers = {
-      2: smoothFreqDataForDisplay(fftData, 2),
-      3: smoothFreqDataForDisplay(fftData, 3),
-      6: smoothFreqDataForDisplay(fftData, SMOOTH_RADIUS)
-    };
-  } else {
-    const ppb = estimatePixelsPerBin(H, binSize);
-    const smoothRadius = ppb>8 ? 2 : ppb>4 ? 3 : SMOOTH_RADIUS;
-    dispLin = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
-  }
+  // Aggregated display cells (DISPLAY_AGG raw bins per cell) are
+  // precomputed once per column. Each row then interpolates between
+  // the two nearest CELLS — the cell width itself provides the band
+  // thickness, and since no averaging spans beyond a cell boundary,
+  // the noise floor keeps its sharp grain instead of being washed
+  // into soft gradients. When zoomed in far enough that a single raw
+  // bin already covers several screen pixels (ppb>4), raw bins are
+  // used directly so fine structure stays visible. In LIN mode
+  // pixel-per-Hz density is uniform so this choice is global; in LOG
+  // mode it varies with frequency and is made per row.
+  const dispAgg = aggregateForDisplay(fftData, DISPLAY_AGG);
+  const useRawLin = !logScale && estimatePixelsPerBin(H, binSize) > 4;
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
-    let disp;
-    if (logScale) {
-      const ppbLocal = pixelsPerBinAt(freq, H, binSize);
-      const r = ppbLocal>8 ? 2 : ppbLocal>4 ? 3 : SMOOTH_RADIUS;
-      disp = dispTiers[r];
-    } else {
-      disp = dispLin;
-    }
-    // Linear interpolation between the two nearest bins, rather than
-    // snapping to the single nearest one, so zooming in reveals a
-    // smooth gradient instead of a hard-edged staircase — several
-    // consecutive screen rows no longer just repeat the exact same
-    // bin's value verbatim when zoomed past the point where one bin
-    // spans multiple pixels.
     const fbin=freq/binSize;
-    const bin0=Math.floor(fbin), bin1=bin0+1, frac=fbin-bin0;
-    const sampleDb=(b)=>(b>=0&&b<disp.length)?disp[b]:-120;
-    const dbLo=sampleDb(bin0), dbHi=sampleDb(bin1);
-    const db=dbLo+(dbHi-dbLo)*frac;
+    const useRaw = logScale ? (pixelsPerBinAt(freq, H, binSize) > 4) : useRawLin;
+    let db;
+    if (useRaw) {
+      const bin0=Math.floor(fbin), frac=fbin-bin0;
+      const s=(b)=>(b>=0&&b<fftData.length)?fftData[b]:-120;
+      db = s(bin0)+(s(bin0+1)-s(bin0))*frac;
+    } else {
+      const x = fbin/DISPLAY_AGG - 0.5; // cell centers sit at (b+0.5)*AGG raw-bin positions
+      const b0=Math.floor(x), frac=x-b0;
+      const s=(b)=>(b>=0&&b<dispAgg.length)?dispAgg[b]:-120;
+      db = s(b0)+(s(b0+1)-s(b0))*frac;
+    }
     const [r,g,b]=dbToRGB(db);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
