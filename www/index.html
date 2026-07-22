@@ -319,7 +319,7 @@ const FFT_SIZE       = 8192;
 const NUM_H          = 8;
 const BEAT_SMOOTH    = 60; // 平均化する直近フレーム数。大きいほど数値の変化がゆっくり滑らかになる
 const BEAT_NULL_THRESH = 30;
-const SCROLL_SPD     = 1;
+const SCROLL_SPD     = 1.2; // css px/frame — sized so one screen width spans roughly 4.5s, matching the reference app's time window
 const FREQ_LO        = 10;
 const FREQ_HI        = 10000;
 const REF_PITCH_DEFAULT = 442.0;
@@ -415,7 +415,7 @@ function dbToRGB(db) {
   // ガンマ補正: ノイズフロア付近(低t)を暗い青/黒側へさらに圧縮し、
   // 真のピーク(高t)はほぼそのまま保つ。これにより参考アプリのような
   // 「無地で暗い背景＋くっきり濃い帯」のコントラストになる。
-  t = Math.pow(t, 1.6);
+  t = Math.pow(t, 1.35);
   // 0.00-0.20: black → dark blue
   // 0.20-0.40: dark blue → blue → cyan  ← noise floor
   // 0.40-0.55: cyan → yellow-green
@@ -710,7 +710,7 @@ async function startMic() {
     gainNode.gain.value = gainVal;
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.5;
+    analyser.smoothingTimeConstant = 0.2; // low time-averaging: keeps beat nodes and the decay envelope crisp in the spectrogram (0.5 smeared them together)
     fftData  = new Float32Array(analyser.frequencyBinCount);
     timeData = new Float32Array(analyser.fftSize); // raw time-domain samples, used by Goertzel pitch refinement
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
@@ -1314,7 +1314,7 @@ function renderLoop() {
 // ピーク自体の高さはほぼ保ったまま、視覚的な帯の太さを参考アプリ
 // 相当(数px〜十数px)に広げる。dB領域で平均すると弱い側に引っ張られて
 // ピークが鈍るため、必ずリニア領域で計算してからdBに戻す。
-const SMOOTH_RADIUS = 4; // ±4 bin (9-tap) — used at normal/zoomed-out view; shrinks automatically when zoomed in (see estimatePixelsPerBin)
+const SMOOTH_RADIUS = 6; // ±6 bin (13-tap) — used at normal/zoomed-out view; shrinks automatically when zoomed in (see estimatePixelsPerBin)
 function smoothFreqDataForDisplay(data, radius) {
   const n = data.length;
   const out = new Float32Array(n);
@@ -1359,7 +1359,7 @@ function drawSpectroColumn(binSize) {
   if (!offCanvas||!offCtx) return;
   const W=offCanvas.width, H=offCanvas.height;
   const dpr=window.devicePixelRatio||1;
-  const shift=SCROLL_SPD*dpr;
+  const shift=Math.max(1, Math.round(SCROLL_SPD*dpr)); // integer device px: fractional drawImage offsets would resample-blur the whole history every frame
   offCtx.drawImage(offCanvas,-shift,0);
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
@@ -1379,13 +1379,13 @@ function drawSpectroColumn(binSize) {
   let dispTiers=null, dispLin=null;
   if (logScale) {
     dispTiers = {
-      1: smoothFreqDataForDisplay(fftData, 1),
       2: smoothFreqDataForDisplay(fftData, 2),
-      4: smoothFreqDataForDisplay(fftData, SMOOTH_RADIUS)
+      3: smoothFreqDataForDisplay(fftData, 3),
+      6: smoothFreqDataForDisplay(fftData, SMOOTH_RADIUS)
     };
   } else {
     const ppb = estimatePixelsPerBin(H, binSize);
-    const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
+    const smoothRadius = ppb>8 ? 2 : ppb>4 ? 3 : SMOOTH_RADIUS;
     dispLin = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
   }
   for (let py=0;py<H;py++) {
@@ -1393,7 +1393,7 @@ function drawSpectroColumn(binSize) {
     let disp;
     if (logScale) {
       const ppbLocal = pixelsPerBinAt(freq, H, binSize);
-      const r = ppbLocal>8 ? 1 : ppbLocal>4 ? 2 : SMOOTH_RADIUS;
+      const r = ppbLocal>8 ? 2 : ppbLocal>4 ? 3 : SMOOTH_RADIUS;
       disp = dispTiers[r];
     } else {
       disp = dispLin;
@@ -1446,7 +1446,7 @@ function drawTimelineColumn() {
   if (!timelineCanvas || !timelineCanvas.width) return;
   const W=timelineCanvas.width, H=timelineCanvas.height;
   const dpr=window.devicePixelRatio||1;
-  const shift=SCROLL_SPD*dpr;
+  const shift=Math.max(1, Math.round(SCROLL_SPD*dpr)); // integer device px: fractional drawImage offsets would resample-blur the whole history every frame
   timelineCtx.drawImage(timelineCanvas,-shift,0);
   const colW=Math.ceil(shift)+1, colX=W-colW;
   timelineCtx.fillStyle="#000";
@@ -1726,7 +1726,7 @@ function drawLevelHistoryColumn(db) {
   if (!levelHistCanvas || !levelHistCanvas.width) return;
   const W=levelHistCanvas.width, H=levelHistCanvas.height;
   const dpr=window.devicePixelRatio||1;
-  const shift=SCROLL_SPD*dpr;
+  const shift=Math.max(1, Math.round(SCROLL_SPD*dpr)); // integer device px: fractional drawImage offsets would resample-blur the whole history every frame
   levelHistCtx.drawImage(levelHistCanvas,-shift,0);
   const colW=Math.ceil(shift)+1, colX=W-colW;
   levelHistCtx.fillStyle="#000";
