@@ -189,12 +189,7 @@ color: #ff8888; font-weight: bold;
 #level-history-section { flex-shrink: 0; display: flex; flex-direction: column; }
 #level-history-stats { display: flex; gap: 12px; font-size: 10px; color: #ccc; }
 #level-history-stats b { font-size: 12px; }
-#level-history-wrap { height: 336px; position: relative; background: #000; flex-shrink: 0; display: flex; }
-#level-ruler {
-width: 52px; flex-shrink: 0; position: relative;
-background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
-}
-#level-canvas-wrap { flex: 1; position: relative; overflow: hidden; }
+#level-history-wrap { height: 336px; position: relative; background: #000; flex-shrink: 0; }
 #level-history-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 
 </style>
@@ -273,6 +268,10 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <span>Beat Frequency — Selected Harmonics</span>
     <div style="display:flex;align-items:center;gap:6px;">
       <button id="btn-sustain-stop" class="ctrl-btn">⏹ STOP</button>
+      <span id="phase-label" style="font-size:10px;color:#ccc;">PHASE EST</span>
+      <div id="phase-toggle" class="toggle-switch">
+        <div id="phase-knob" class="toggle-knob"></div>
+      </div>
       <span id="sustain-label" style="font-size:10px;color:#ccc;">SUSTAIN</span>
       <div id="sustain-toggle" class="toggle-switch">
         <div id="sustain-knob" class="toggle-knob"></div>
@@ -301,15 +300,13 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   <div class="section-label">
     <span>Sound Level</span>
     <div id="level-history-stats">
+      <span>MIN <b id="lvl-min" style="color:#4af">— dB</b></span>
       <span>AVG <b id="lvl-avg" style="color:#8f8">— dB</b></span>
       <span>MAX <b id="lvl-max" style="color:#f66">— dB</b></span>
     </div>
   </div>
   <div id="level-history-wrap">
-    <div id="level-ruler"></div>
-    <div id="level-canvas-wrap">
-      <canvas id="level-history-canvas"></canvas>
-    </div>
+    <canvas id="level-history-canvas"></canvas>
   </div>
 </div>
 
@@ -352,7 +349,7 @@ let harmonicFreqRefined = new Array(NUM_H).fill(null);
 let pendingFreq  = null; // candidate new pitch awaiting confirmation across several frames
 let pendingCount = 0;    // how many consecutive frames have agreed with pendingFreq
 let viewLo       = 0;
-let viewHi       = 4000; // default range matches reference app
+let viewHi       = 4200; // default range matches reference app
 
 // Amplitude envelope peak-interval tracking, per harmonic.
 // We track the dB value of the harmonic each frame, detect local
@@ -377,6 +374,23 @@ let timelineOn           = new Array(NUM_H).fill(false);
 let timelineDbHeld       = new Array(NUM_H).fill(-96); // slow-release smoothed level, drives both on/off and bar thickness
 const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief detection dropouts without a real gap
 
+// Phase-derivative beat period estimator (opt-in via the PHASE EST
+// toggle; OFF by default). Rather than waiting to observe an actual
+// peak-to-peak cycle in the amplitude envelope (which for a very slow
+// beat can take many seconds before any estimate is available at
+// all), this treats the envelope as E(t) = Emax*|cos(pi*deltaF*t)|
+// and solves for deltaF directly from the instantaneous envelope
+// value and its rate of change. This can, in principle, produce a
+// usable estimate long before a full beat cycle has been observed —
+// though it is inherently approximate (assumes both strings are close
+// to equal loudness, and is unreliable very near envelope peaks/
+// troughs where the derivative vanishes), so it's shown as a
+// secondary "≈" estimate alongside the existing measured value.
+let phaseEstMode    = false;
+let ampLinBuf        = Array.from({length:NUM_H}, ()=>[]); // rolling {t, lin} amplitude samples
+let ampEmaxTrack     = new Array(NUM_H).fill(null);        // slowly-decaying recent-max linear amplitude (~Emax)
+let phaseEstBeatHz   = new Array(NUM_H).fill(null);        // last usable deltaF estimate, Hz
+const PHASE_EST_BUF_MS = 400; // window used for the local envelope derivative
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
 const ONSET_DB_THRESHOLD = -40; // must reach at least this loud to be considered "sounding" (sustain start)
@@ -398,9 +412,7 @@ let blackmanWin = null;
 // Sound level history strip-chart state
 const levelHistCanvas = document.getElementById("level-history-canvas");
 const levelHistCtx    = levelHistCanvas.getContext("2d");
-let levelSum=0, levelCount=0; // AVG: unchanged, accumulates across the whole session
-let levelMaxCurrent=null;     // MAX: peak level of just the most recent key strike, reset on each new onset
-let levelHeld=-96, levelStrikeOn=false; // slow-release held level, used only to detect strike onset/offset
+let levelMin=null, levelMax=null, levelSum=0, levelCount=0;
 
 // ── Colour map (matches reference app exactly) ─────────────
 // Reference: background=cyan(-60dB), signal=yellow-red(-40~0dB)
@@ -478,7 +490,7 @@ for (let h = 0; h < NUM_H; h++) {
   card.className = "beat-card";
   card.id = "bcard"+h;
   card.style.display = "none";
-  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}" style="display:none">— s</div>`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}" style="display:none">— s</div><div class="bc-est" id="bce${h}" style="display:none;font-size:8px;color:#8ac6ff;margin-top:1px;">≈ — s</div>`;
   beatBarEl.appendChild(card);
   beatCards[h] = card;
 }
@@ -519,7 +531,6 @@ function initLevelHistCanvas() {
   levelHistCanvas.style.height = h + "px";
   levelHistCtx.fillStyle = "#000";
   levelHistCtx.fillRect(0, 0, levelHistCanvas.width, levelHistCanvas.height);
-  updateLevelRulerLabels();
 }
 function initTimelineCanvas() {
   const dpr  = window.devicePixelRatio || 1;
@@ -536,17 +547,8 @@ function initTimelineCanvas() {
 // Explicitly (re)assert the default view range before the very first
 // canvas init, in case anything touched viewLo/viewHi before this point.
 viewLo = logScale ? 10 : 0;
-viewHi = 4000;
+viewHi = 4200;
 requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }));
-// Safety re-init: on a cold app launch, the WKWebView's layout
-// (safe-area insets, dynamic viewport units) can occasionally still
-// be settling slightly after the double-rAF above already ran,
-// leaving the canvas sized against stale measurements. A couple of
-// delayed re-measurements catch that without any visible effect if
-// the layout was already correct (re-running this is cheap and
-// idempotent).
-setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 300);
-setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 1000);
 window.addEventListener("resize", ()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); });
 
 // ── Touch: 1-finger scroll + pinch zoom ───────────────────
@@ -614,7 +616,6 @@ swrap.addEventListener("touchmove", e => {
       let lo = viewLo + shift, hi = viewHi + shift;
       if (lo < LIN_FLOOR) { lo=LIN_FLOOR; hi=lo+range; }
       if (hi > FREQ_HI) { hi=FREQ_HI; lo=hi-range; }
-      if (lo < LIN_FLOOR) lo=LIN_FLOOR;
       viewLo=lo; viewHi=hi;
     }
     if (offCtx) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
@@ -652,30 +653,8 @@ swrap.addEventListener("touchmove", e => {
   }
 }, {passive:false});
 
-let lastSpectroTapTime=0, lastSpectroTapX=0, lastSpectroTapY=0;
 swrap.addEventListener("touchend", e => {
-  if (e.touches.length === 0) {
-    scrollY0=null; pinchDist0=null;
-    // Double-tap-to-reset: two quick taps in roughly the same spot on
-    // the spectrogram reset the view to the default 0Hz–4000Hz range.
-    // A manual way back in case the view is ever scrolled/zoomed
-    // somewhere confusing. Native double-tap-zoom is already disabled
-    // app-wide, so this gesture is free to reuse here.
-    const t = e.changedTouches && e.changedTouches[0];
-    if (t) {
-      const now = Date.now();
-      const dx = t.clientX-lastSpectroTapX, dy = t.clientY-lastSpectroTapY;
-      if (now-lastSpectroTapTime <= 350 && (dx*dx+dy*dy) <= (30*30)) {
-        resetSpectrogramView();
-        resetSustainTimers();
-        resetLevelHistory();
-        updateBeatDisplay();
-        lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
-      } else {
-        lastSpectroTapTime = now; lastSpectroTapX = t.clientX; lastSpectroTapY = t.clientY;
-      }
-    }
-  }
+  if (e.touches.length === 0) { scrollY0=null; pinchDist0=null; }
   else if (e.touches.length === 1) {
     pinchDist0=null;
     scrollY0=e.touches[0].clientY; scrollLo0=viewLo; scrollHi0=viewHi;
@@ -717,13 +696,6 @@ async function startMic() {
     }
     document.getElementById("sr-label").textContent = audioCtx.sampleRate+" Hz";
     micOn = true;
-    // Reset the spectrogram view to the default range every time the
-    // mic is turned on, regardless of how long the app was
-    // backgrounded or whether the OS suspended vs. fully reloaded the
-    // page — this is the one action guaranteed to happen at the start
-    // of every session, so it's a reliable reset point independent of
-    // unreliable visibility/focus timing in a WKWebView.
-    resetSpectrogramView();
     resetLevelHistory();
     const btn = document.getElementById("mic-btn");
     btn.textContent = "🎙 MIC ON"; btn.className = "on";
@@ -744,44 +716,9 @@ function stopMic() {
   resetState();
   resetLevelHistory();
 }
-function resetSpectrogramView() {
-  viewLo = logScale ? 10 : 0;
-  viewHi = 4000;
-  // Re-measure and rebuild the canvas backing buffer too, not just the
-  // logical view range. On a cold launch, the very first initCanvas()
-  // call (guarded by a double requestAnimationFrame) can still
-  // occasionally run before the WKWebView's layout has fully settled
-  // (safe-area insets, dynamic viewport units, etc.), capturing a
-  // stale/incorrect height. Everything downstream — the frequency-to-
-  // pixel mapping, label positions, and the touch-drag math (which
-  // reads the canvas's actual rendered size) — inherits that mistake,
-  // which looked like "the view doesn't start at 0Hz" and "dragging
-  // doesn't reach the bottom" even though the logical range above was
-  // correct the whole time. Re-running these once layout is
-  // definitely stable (mic start, app foreground, double-tap) fixes
-  // it at the source instead of working around symptoms.
-  if (typeof initCanvas === "function") initCanvas();
-  if (typeof initLevelHistCanvas === "function") initLevelHistCanvas();
-  if (typeof initTimelineCanvas === "function") initTimelineCanvas();
-  lastAxisUpdate = 0;
-}
-// iOS commonly resumes a suspended WKWebView instance instead of
-// reloading it, so JS state (including whatever zoom/scroll the
-// spectrogram was left at) can persist silently across an app
-// switch — and standard DOM visibility events are not fully reliable
-// for detecting this inside a Capacitor WKWebView specifically (they
-// were designed for browser-tab visibility, not native app
-// foregrounding, and don't always fire consistently for the latter).
-// Attaching the same reset to several different, redundant signals
-// maximizes the chance that at least one of them actually fires.
 document.addEventListener("visibilitychange", ()=>{
-  if (!document.hidden) {
-    if (audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
-    resetSpectrogramView();
-  }
+  if (!document.hidden && audioCtx?.state==="suspended") audioCtx.resume().catch(()=>{});
 });
-window.addEventListener("pageshow", ()=>{ resetSpectrogramView(); });
-window.addEventListener("focus", ()=>{ resetSpectrogramView(); });
 
 // ── Prevent double-tap-to-zoom across the whole app ────────
 // viewport's user-scalable=no is not always honored by iOS Safari for
@@ -854,13 +791,13 @@ function refineFreqGoertzel(samples, win, sr, freqGuess, binSize) {
 function detectPitch(data, sr, timeSamples) {
   const binSize = sr / FFT_SIZE;
   const lo = Math.floor(27.5/binSize);
-  // Search up to C8 (~4200Hz, the top of the piano), not just 2000Hz —
-  // any note whose fundamental sits above 2000Hz (roughly B6 and up)
-  // was previously impossible to detect at all, since maxBin could
-  // never even be considered above that ceiling. This is what made
-  // C6-and-above register detection unreliable: notes right at or
-  // above the old cutoff would fail outright rather than just being
-  // less accurate.
+  // Search up to ~4500Hz (comfortably above the piano's highest note,
+  // C8≈4186Hz) rather than the previous 2000Hz cap, which silently
+  // failed to detect any fundamental at or above roughly B6/C7 even
+  // though the spectrogram display clearly showed activity there.
+  // 4500*5=22500Hz stays just under the 44.1kHz sample rate's Nyquist
+  // limit (22050Hz), so the 5-harmonic HPS product below still has
+  // valid data to multiply for candidates near the top of this range.
   const hi = Math.min(Math.floor(4500/binSize), data.length-1);
   const lin= new Float32Array(data.length);
   for (let i=0; i<data.length; i++) lin[i]=Math.pow(10, data[i]/20);
@@ -870,33 +807,13 @@ function detectPitch(data, sr, timeSamples) {
               *lin[Math.min(i*4,data.length-1)]*lin[Math.min(i*5,data.length-1)];
     if (v>maxVal) { maxVal=v; maxBin=i; }
   }
-  // Missing-fundamental fallback (harmonic SUM instead of product):
-  // the lowest piano notes (roughly G#1 / ~52Hz and below) commonly
-  // have almost no energy at the fundamental itself — the ear still
-  // perceives the correct pitch from the harmonic series alone
-  // ("virtual pitch"/missing fundamental), but the multiplicative
-  // search above requires real energy AT the candidate frequency
-  // itself, so a genuinely near-silent fundamental bin zeroes out the
-  // whole product there and the true candidate never wins. This is
-  // only tried when the normal search above found nothing usable, and
-  // only accepted if at least 5 of its first 8 harmonics show real
-  // energy, so it can't latch onto noise.
-  let usedMissingFundamentalFallback = false;
-  if (maxBin===0 || data[maxBin]<-72) {
-    const shsLo = Math.max(1, Math.floor(20/binSize));
-    const shsHi = Math.floor(85/binSize);
-    let shsBest=-1, shsBestSum=0;
-    for (let i=shsLo; i<=shsHi; i++) {
-      let sum=0, coherent=0;
-      for (let m=1; m<=8; m++) {
-        const bin = Math.min(i*m, data.length-1);
-        if (data[bin] > -80) { sum += lin[bin]; coherent++; }
-      }
-      if (coherent>=5 && sum>shsBestSum) { shsBestSum=sum; shsBest=i; }
-    }
-    if (shsBest>0) { maxBin = shsBest; usedMissingFundamentalFallback = true; }
-  }
-  if (maxBin===0 || (data[maxBin]<-72 && !usedMissingFundamentalFallback)) return null;
+  // Real piano strings produce progressively weaker fundamentals (relative
+  // to their own overtones) the higher up the keyboard you go, due to
+  // soundboard/string physics — a high note can be clearly audible and
+  // visible in the spectrogram while its fundamental bin alone sits well
+  // below -72dB. Relaxed to -84dB so quieter-but-real high fundamentals
+  // aren't silently discarded before the note name ever gets computed.
+  if (maxBin===0 || data[maxBin]<-84) return null;
 
   // --- オクターブ/倍音ロック補正 ---
   // 低音では基音binのエネルギーが弱く、強い倍音位置がHPSで
@@ -909,30 +826,22 @@ function detectPitch(data, sr, timeSamples) {
   //    十分近い強度を持つ場合のみ「独立した基音」とみなす
   //  - 最低4本の倍音が観測できる場合のみ判定（統計的信頼性の確保）
   //  - 一致率のしきい値を厳しくする (0.6 → 0.85)
-  // Skipped entirely when the missing-fundamental fallback above was
-  // used: that path already found the true fundamental via a
-  // purpose-built method, and this correction step assumes a
-  // normally (product-)detected maxBin, which doesn't apply here —
-  // running it anyway risked "correcting" an already-correct low
-  // note even further down.
-  if (!usedMissingFundamentalFallback) {
-    const maxBinDb = data[maxBin];
-    let correctedBin = maxBin;
-    for (let k=2; k<=6; k++) {
-      const subBin = Math.round(maxBin/k);
-      if (subBin < lo) continue;
-      // 候補の基音binが、検出された最強ピークと比べて明らかに弱い場合は
-      // 対象外（ノイズやサイドローブの可能性が高い）。
-      if (data[subBin] < maxBinDb - 20) continue;
-      let coherent=0, total=0;
-      for (let m=1; m*subBin<=hi && m<=8; m++) {
-        total++;
-        if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
-      }
-      if (total>=4 && coherent/total >= 0.85) { correctedBin = subBin; break; }
+  const maxBinDb = data[maxBin];
+  let correctedBin = maxBin;
+  for (let k=2; k<=6; k++) {
+    const subBin = Math.round(maxBin/k);
+    if (subBin < lo) continue;
+    // 候補の基音binが、検出された最強ピークと比べて明らかに弱い場合は
+    // 対象外（ノイズやサイドローブの可能性が高い）。
+    if (data[subBin] < maxBinDb - 20) continue;
+    let coherent=0, total=0;
+    for (let m=1; m*subBin<=hi && m<=8; m++) {
+      total++;
+      if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
     }
-    maxBin = correctedBin;
+    if (total>=4 && coherent/total >= 0.85) { correctedBin = subBin; break; }
   }
+  maxBin = correctedBin;
 
   // 粗い推定値（パラボリック補間）
   const prev=maxBin>0?lin[maxBin-1]:lin[maxBin];
@@ -957,15 +866,7 @@ function detectPitch(data, sr, timeSamples) {
 function refineHarmonicFreq(data, sr, theoreticalFreq, h) {
   if (!theoreticalFreq) return null;
   const binSize = sr/FFT_SIZE;
-  // Real piano strings are inharmonic, and the sharpening grows
-  // roughly with the SQUARE of the harmonic number (stiff-string /
-  // Railsback-style stretch), not linearly. A window that only grew
-  // linearly with h was too narrow for the higher harmonics (H6-H8)
-  // — especially in the 2-4kHz range, common for the upper harmonics
-  // of ordinary mid-register notes — so it could miss the true,
-  // further-shifted peak entirely and fall back to the unshifted
-  // theoretical position instead.
-  const tolHz = Math.max(binSize*3, theoreticalFreq*(0.004+(h+1)*(h+1)*0.0005));
+  const tolHz = Math.max(binSize*3, theoreticalFreq*(0.004+h*0.0035));
   const cBin = Math.round(theoreticalFreq/binSize);
   const wBins = Math.max(2, Math.round(tolHz/binSize));
   const s = Math.max(1, cBin-wBins), e = Math.min(data.length-2, cBin+wBins);
@@ -1103,7 +1004,6 @@ function renderLoop() {
   updateLevel(peak);
   drawLevelHistoryColumn(peak);
   updateLevelStats(peak);
-
   const freq=detectPitch(fftData,sr,timeData);
   if (freq) {
     // Smooth currentFreq so the H1–H8 guide lines / labels don't jitter
@@ -1131,6 +1031,7 @@ function renderLoop() {
       currentFreq = currentFreq + (freq-currentFreq)*0.12;
       pendingFreq = null; pendingCount = 0;
     }
+    updateNoteDisplay(currentFreq);
   }
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
@@ -1197,6 +1098,30 @@ function renderLoop() {
       ampNullCount[h]=0;
       if (noteStartTime[h]===null) noteStartTime[h]=now;
 
+      if (phaseEstMode) {
+        const lin = Math.pow(10, result.db/20);
+        ampLinBuf[h].push({t:now, lin});
+        while (ampLinBuf[h].length && now-ampLinBuf[h][0].t > PHASE_EST_BUF_MS) ampLinBuf[h].shift();
+        if (ampEmaxTrack[h]===null || lin>ampEmaxTrack[h]) ampEmaxTrack[h]=lin;
+        else ampEmaxTrack[h] *= 0.999; // slow decay so a stale high value doesn't stick forever
+        if (ampLinBuf[h].length>=6 && ampEmaxTrack[h]>0) {
+          const first=ampLinBuf[h][0], last=ampLinBuf[h][ampLinBuf[h].length-1];
+          const dt=(last.t-first.t)/1000;
+          if (dt>0.05) {
+            const dEdt = (last.lin-first.lin)/dt;
+            const ratio = Math.min(0.98, Math.max(-0.98, ((last.lin+first.lin)/2)/ampEmaxTrack[h]));
+            const sinTheta = Math.sqrt(Math.max(0, 1-ratio*ratio));
+            // Skip the update very close to an envelope peak/trough
+            // (sinTheta≈0): the derivative-based formula divides by
+            // sinTheta there and becomes numerically unstable.
+            if (sinTheta > 0.12) {
+              const freqEst = Math.abs(dEdt) / (Math.PI*ampEmaxTrack[h]*sinTheta);
+              if (freqEst>0.001 && freqEst<20) phaseEstBeatHz[h]=freqEst;
+            }
+          }
+        }
+      }
+
       ampEnv[h].push({t:now, db:result.db});
       while (ampEnv[h].length && now - ampEnv[h][0].t > ENV_KEEP_MS) ampEnv[h].shift();
 
@@ -1243,13 +1168,6 @@ function renderLoop() {
       }
     }
   }
-  // Snap the top-left note/cents display to the actual spectral peak
-  // (harmonicFreqRefined[0], the same H1 position the in-graph tag
-  // uses) rather than the raw smoothed pitch estimate — a note
-  // sitting near the midpoint between two semitones was otherwise
-  // able to show a different reading up top than what the tag below
-  // it (which snaps to the real peak) displayed.
-  updateNoteDisplay(harmonicFreqRefined[0]!==null && harmonicFreqRefined[0]!==undefined ? harmonicFreqRefined[0] : currentFreq);
   if (viewMode === 'spec') {
     drawSpectroColumn(binSize);
   } else {
@@ -1285,27 +1203,19 @@ function smoothFreqDataForDisplay(data, radius) {
   return out;
 }
 
-// How many screen pixels one FFT bin currently spans AT A GIVEN
-// FREQUENCY, at the current zoom/scale. At the default zoomed-out
-// view a bin is only a couple pixels tall, so a few bins' worth of
-// smoothing/bleed reads as a pleasingly solid band; pinch-zoomed in,
-// that same bin count can span dozens of pixels, making bands look
-// bloated and overlapping neighboring harmonics. Scaling the
-// smoothing down as this value grows keeps the visual band thickness
-// roughly constant on screen regardless of zoom level.
-function pixelsPerBinAt(freq, H, binSize) {
-  const y1 = freqToY(freq, H);
-  const y2 = freqToY(Math.min(viewHi, freq+binSize), H);
-  return Math.max(0.01, Math.abs(y1-y2));
-}
-// Single-value convenience wrapper evaluated at the view's midpoint
-// frequency. In LIN mode pixel-per-Hz density is uniform across the
-// whole visible range, so this one value is accurate for every row.
-// In LOG mode it is NOT uniform (see drawSpectroColumn), so this
-// wrapper is only used there as a fallback/reference, not per-row.
+// How many screen pixels one FFT bin currently spans, at the given
+// zoom/scale. At the default zoomed-out view a bin is only a couple
+// pixels tall, so a few bins' worth of smoothing/bleed reads as a
+// pleasingly solid band; pinch-zoomed in, that same bin count can
+// span dozens of pixels, making bands look bloated and overlapping
+// neighboring harmonics. Scaling the smoothing/bleed down as this
+// value grows keeps the visual band thickness roughly constant on
+// screen regardless of zoom level.
 function estimatePixelsPerBin(H, binSize) {
   const midFreq = logScale ? Math.sqrt(Math.max(1,viewLo)*Math.max(viewLo+1,viewHi)) : (viewLo+viewHi)/2;
-  return pixelsPerBinAt(midFreq, H, binSize);
+  const y1 = freqToY(midFreq, H);
+  const y2 = freqToY(Math.min(viewHi, midFreq+binSize), H);
+  return Math.max(0.01, Math.abs(y1-y2));
 }
 
 function drawSpectroColumn(binSize) {
@@ -1317,40 +1227,11 @@ function drawSpectroColumn(binSize) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
-  // In LIN mode, pixel-per-Hz density is the same everywhere in the
-  // visible range, so one global smoothing radius (from the view's
-  // midpoint) is accurate for every row and only needs computing
-  // once. In LOG mode, density varies strongly with frequency — the
-  // same Hz-wide bin spans far more screen pixels near the bottom of
-  // the view than near the top — so using one global radius made the
-  // band look thick in the bass and thin in the treble regardless of
-  // overall zoom level. Precomputing all three smoothing tiers once
-  // per column (cheap: each is a single O(bins) pass) and picking the
-  // right one PER ROW, based on that row's own local pixel-per-bin
-  // density, keeps the band thickness consistent across the whole
-  // register in LOG mode too.
-  let dispTiers=null, dispLin=null;
-  if (logScale) {
-    dispTiers = {
-      1: smoothFreqDataForDisplay(fftData, 1),
-      2: smoothFreqDataForDisplay(fftData, 2),
-      4: smoothFreqDataForDisplay(fftData, SMOOTH_RADIUS)
-    };
-  } else {
-    const ppb = estimatePixelsPerBin(H, binSize);
-    const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
-    dispLin = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
-  }
+  const ppb = estimatePixelsPerBin(H, binSize);
+  const smoothRadius = ppb>8 ? 1 : ppb>4 ? 2 : SMOOTH_RADIUS;
+  const disp = smoothFreqDataForDisplay(fftData, smoothRadius); // 表示専用。ピッチ/ビート検出は元のfftDataを使用
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
-    let disp;
-    if (logScale) {
-      const ppbLocal = pixelsPerBinAt(freq, H, binSize);
-      const r = ppbLocal>8 ? 1 : ppbLocal>4 ? 2 : SMOOTH_RADIUS;
-      disp = dispTiers[r];
-    } else {
-      disp = dispLin;
-    }
     // Linear interpolation between the two nearest bins, rather than
     // snapping to the single nearest one, so zooming in reveals a
     // smooth gradient instead of a hard-edged staircase — several
@@ -1362,7 +1243,21 @@ function drawSpectroColumn(binSize) {
     const sampleDb=(b)=>(b>=0&&b<disp.length)?disp[b]:-120;
     const dbLo=sampleDb(bin0), dbHi=sampleDb(bin1);
     const db=dbLo+(dbHi-dbLo)*frac;
-    const [r,g,b]=dbToRGB(db);
+    const dbP1=sampleDb(bin1+1);
+    const dbM1=sampleDb(bin0-1);
+    // Neighbor-bin "bleed" (borrowing brightness from an adjacent bin
+    // when it's louder) must stay a FIXED multiplier here, not scaled
+    // down with zoom: dB values are negative/logarithmic, and
+    // multiplying a very negative value by a *smaller* fraction moves
+    // it *closer to 0* (i.e. makes it look louder, not quieter) — the
+    // opposite of "less bleed". A previous attempt to shrink this
+    // weight at high zoom caused exactly that: near-silent bins were
+    // getting brightened into solid color across the whole screen.
+    // The zoom-dependent thinning above (smoothRadius) is sufficient
+    // and doesn't have this problem, since it averages in linear
+    // amplitude space rather than multiplying dB directly.
+    const dbMax = Math.max(db,dbP1*0.9,dbM1*0.9);
+    const [r,g,b]=dbToRGB(dbMax);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
       d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=255;
@@ -1445,9 +1340,6 @@ function updateFreqAxisLabels() {
     // lanes by harmonic number, independent of the note's actual
     // pitch. No edge-clamping here (unlike the frequency ruler): with
     // a fixed lane grid every label sits exactly at its lane's center.
-    // Labels are left-aligned (instead of the frequency ruler's
-    // right-alignment) with the note name appended after the H-number,
-    // so each lane reads "H1 D3" etc.
     const laneH = H/NUM_H;
     for (let h=0; h<NUM_H; h++) {
       const rowFromTop = NUM_H-1-h;
@@ -1455,11 +1347,7 @@ function updateFreqAxisLabels() {
       const lbl=document.createElement("div");
       lbl.className="ruler-label";
       lbl.style.top=y+"px";
-      lbl.style.left="4px";
-      lbl.style.right="auto";
-      const hf = harmonicFreqRefined[h];
-      const note = hf ? freqToNote(hf) : null;
-      lbl.textContent = note ? ("H"+(h+1)+" "+note.name) : ("H"+(h+1));
+      lbl.textContent="H"+(h+1);
       freqRulerEl.appendChild(lbl);
     }
     return;
@@ -1494,8 +1382,7 @@ function updateFreqAxisLabels() {
       lbl.className="freq-label";
       lbl.style.top=Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y))+"px";
       lbl.style.color=selH[h]?"rgba(0,255,85,0.95)":"rgba(255,220,100,0.6)";
-      const hfNote=freqToNote(hf);
-      lbl.textContent=hfNote ? `H${h+1} ${hfNote.name} ${hf.toFixed(0)}Hz` : `H${h+1} ${hf.toFixed(0)}Hz`;
+      lbl.textContent=`H${h+1} ${hf.toFixed(0)}Hz`;
       freqAxisEl.appendChild(lbl);
     }
   }
@@ -1536,6 +1423,17 @@ function updateBeatDisplay() {
         durEl.textContent = "— s";
       }
     }
+
+    // Phase-derivative period estimate, only shown when PHASE EST is
+    // toggled on and a usable estimate exists for this harmonic.
+    const estEl = document.getElementById("bce"+h);
+    if (!phaseEstMode || phaseEstBeatHz[h]===null) {
+      estEl.style.display = "none";
+    } else {
+      estEl.style.display = "block";
+      const periodS = 1/phaseEstBeatHz[h];
+      estEl.textContent = "≈ " + (periodS>=100 ? periodS.toFixed(0) : periodS.toFixed(1)) + " s";
+    }
   }
   document.getElementById("beat-bar-empty").style.display=any?"none":"block";
 }
@@ -1554,16 +1452,6 @@ function toggleH(h) {
 }
 
 let displayFreqSmoothed = null;
-// The cents readout used to repaint every single animation frame
-// (~60/sec), which made the number flicker too fast to actually read.
-// Internal pitch smoothing still runs every frame (keeps tracking
-// responsive), but the visible text now only refreshes twice a
-// second, showing the average of everything sampled since the last
-// refresh — a stable, readable number instead of a blur.
-let noteDisplayBuffer = []; // {freq, cents, name} samples collected since the last visible update
-let lastNoteDisplayUpdate = 0;
-let lastDisplayedNoteName = null; // detects a genuine note change so it can be shown immediately
-const NOTE_DISPLAY_INTERVAL_MS = 500;
 function updateNoteDisplay(freq) {
   const nb=document.getElementById("note-big");
   const ns=document.getElementById("note-sub");
@@ -1574,81 +1462,16 @@ function updateNoteDisplay(freq) {
     displayFreqSmoothed = (displayFreqSmoothed===null) ? freq : displayFreqSmoothed + (freq - displayFreqSmoothed)*0.2;
     const note=freqToNote(displayFreqSmoothed);
     if (note) {
-      // A genuine note change must show up right away, not wait out
-      // the rest of the current 0.5s window blended with leftover
-      // samples from the previous note — that made a freshly-struck
-      // note look like it was still showing the last one for up to
-      // half a second.
-      if (note.name !== lastDisplayedNoteName) {
-        noteDisplayBuffer = [];
-        lastNoteDisplayUpdate = 0;
-      }
-      noteDisplayBuffer.push({freq:displayFreqSmoothed, cents:note.cents, name:note.name});
-      const nowT = performance.now();
-      if (nowT - lastNoteDisplayUpdate >= NOTE_DISPLAY_INTERVAL_MS) {
-        const avgFreq  = noteDisplayBuffer.reduce((a,v)=>a+v.freq,0)/noteDisplayBuffer.length;
-        const avgCents = noteDisplayBuffer.reduce((a,v)=>a+v.cents,0)/noteDisplayBuffer.length;
-        // Note name uses the most recent sample in the window, so a
-        // note change right at the boundary shows the new name rather
-        // than a meaningless blend of two different notes' names.
-        const dispName = noteDisplayBuffer[noteDisplayBuffer.length-1].name;
-        nb.textContent=dispName; nb.style.color="#fff";
-        ns.textContent=`${avgFreq.toFixed(2)} Hz  ${avgCents>=0?"+":""}${avgCents.toFixed(1)}¢`;
-        ns.style.color="#aaa";
-        lastDisplayedNoteName = dispName;
-        noteDisplayBuffer = [];
-        lastNoteDisplayUpdate = nowT;
-      }
+      nb.textContent=note.name; nb.style.color="#fff";
+      ns.textContent=`${displayFreqSmoothed.toFixed(2)} Hz  ${note.cents>=0?"+":""}${note.cents.toFixed(1)}¢`;
+      ns.style.color="#aaa";
       return;
     }
   } else {
     displayFreqSmoothed = null;
-    noteDisplayBuffer = [];
-    lastNoteDisplayUpdate = 0;
-    lastDisplayedNoteName = null;
   }
   nb.textContent="—"; nb.style.color="#444";
   ns.textContent="— Hz"; ns.style.color="#444";
-}
-
-// Converts a raw dB value (negative, 0 = full scale, -96 = noise
-// floor) into a positive scale measured as distance above the floor,
-// so louder sounds always produce bigger numbers — unlike a plain
-// Math.abs(), where louder (closer to 0) actually gives a SMALLER
-// number.
-function dbToLevelScale(db) {
-  return Math.max(0, db + 96);
-}
-
-// Sound Level graph's left-side ruler: labeled 20–120 in steps of 20,
-// on the same floor-relative scale as dbToLevelScale. The achievable
-// maximum (full-scale raw signal) only reaches 96, so 100/120 sit in
-// a deliberate headroom band at the top of the chart — same idea as
-// the headroom above 0dBFS on a hardware level meter.
-const LEVEL_SCALE_MIN = 0, LEVEL_SCALE_MAX = 120, LEVEL_SCALE_STEP = 20;
-function levelToY(levelVal, H) {
-  return H * (1 - (levelVal - LEVEL_SCALE_MIN) / (LEVEL_SCALE_MAX - LEVEL_SCALE_MIN));
-}
-const levelRulerEl = document.getElementById("level-ruler");
-function updateLevelRulerLabels() {
-  if (!levelRulerEl) return;
-  levelRulerEl.innerHTML = "";
-  const H = levelHistCanvas.clientHeight || 300;
-  if (H < 10) return;
-  const LABEL_MARGIN = 9;
-  for (let g=LEVEL_SCALE_MIN; g<=LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) {
-    const y = levelToY(g, H);
-    const clampedY = Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y));
-    const tick=document.createElement("div");
-    tick.className="ruler-tick";
-    tick.style.top=clampedY+"px";
-    levelRulerEl.appendChild(tick);
-    const lbl=document.createElement("div");
-    lbl.className="ruler-label";
-    lbl.style.top=clampedY+"px";
-    lbl.textContent=g+"dB";
-    levelRulerEl.appendChild(lbl);
-  }
 }
 
 function updateLevel(db) {
@@ -1681,55 +1504,30 @@ function drawLevelHistoryColumn(db) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   levelHistCtx.fillStyle="#000";
   levelHistCtx.fillRect(colX,0,colW,H);
-  // Faint reference gridlines every 20dB, matching the left-side ruler
+  // Faint reference gridlines every 24dB (0, -24, -48, -72, -96)
   levelHistCtx.strokeStyle="rgba(255,255,255,0.08)";
   levelHistCtx.lineWidth=dpr;
-  for (let g=LEVEL_SCALE_MIN; g<=LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) {
-    const y = levelToY(g, H);
+  for (let g=0; g>=-96; g-=24) {
+    const y = H*(1-(g+96)/96);
     levelHistCtx.beginPath(); levelHistCtx.moveTo(colX,y); levelHistCtx.lineTo(colX+colW,y); levelHistCtx.stroke();
   }
-  const levelVal = dbToLevelScale(isFinite(db)?db:-96);
-  const barTopY = levelToY(levelVal, H);
-  const barH = H - barTopY;
+  const pct = Math.max(0, Math.min(1, ((isFinite(db)?db:-96)+96)/96));
+  const barH = pct*H;
   levelHistCtx.fillStyle = levelToColor(db);
-  levelHistCtx.fillRect(colX, barTopY, colW, barH);
+  levelHistCtx.fillRect(colX, H-barH, colW, barH);
 }
 function updateLevelStats(db) {
   if (!isFinite(db)) return;
+  if (levelMin===null || db<levelMin) levelMin=db;
+  if (levelMax===null || db>levelMax) levelMax=db;
   levelSum += db; levelCount++;
-  // Displayed as distance above the -96dB noise floor (0 = silence,
-  // 96 = full scale), rather than the raw dB value's absolute value —
-  // plain Math.abs(db) technically removes the minus sign, but since
-  // louder sounds have dB values CLOSER to 0, their absolute value is
-  // actually SMALLER, so a strong strike made the number shrink
-  // instead of grow. This floor-relative scale keeps "louder = bigger
-  // number" intuitive.
-  document.getElementById("lvl-avg").textContent = dbToLevelScale(levelSum/levelCount).toFixed(1)+" dB";
-
-  // MAX: peak of just the current key strike, not an all-time running
-  // max. Uses the same slow-release held-level technique as the
-  // Timeline view to detect strike onset/offset (bridges brief
-  // detection dropouts without a real gap): the moment a NEW strike
-  // is detected (level crosses the onset threshold after having been
-  // below the stop threshold), the tracked peak resets and starts
-  // fresh, so MAX always answers "how loud was that last hit" rather
-  // than accumulating across the whole session.
-  if (db > levelHeld) levelHeld = db;
-  else levelHeld = Math.max(-96, levelHeld - TIMELINE_RELEASE_DB_PER_FRAME);
-  if (levelHeld >= timelineOnsetDb()) {
-    if (!levelStrikeOn) { levelStrikeOn = true; levelMaxCurrent = null; }
-  } else if (levelHeld < timelineStopDb()) {
-    levelStrikeOn = false;
-  }
-  if (levelStrikeOn) {
-    levelMaxCurrent = (levelMaxCurrent===null) ? db : Math.max(levelMaxCurrent, db);
-  }
-  if (levelMaxCurrent !== null) {
-    document.getElementById("lvl-max").textContent = dbToLevelScale(levelMaxCurrent).toFixed(1)+" dB";
-  }
+  document.getElementById("lvl-min").textContent = levelMin.toFixed(1)+" dB";
+  document.getElementById("lvl-max").textContent = levelMax.toFixed(1)+" dB";
+  document.getElementById("lvl-avg").textContent = (levelSum/levelCount).toFixed(1)+" dB";
 }
 function resetLevelHistory() {
-  levelSum=0; levelCount=0; levelMaxCurrent=null; levelHeld=-96; levelStrikeOn=false;
+  levelMin=null; levelMax=null; levelSum=0; levelCount=0;
+  document.getElementById("lvl-min").textContent="— dB";
   document.getElementById("lvl-max").textContent="— dB";
   document.getElementById("lvl-avg").textContent="— dB";
   if (levelHistCtx && levelHistCanvas.width) {
@@ -1744,8 +1542,9 @@ function resetState() {
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
+  ampLinBuf=Array.from({length:NUM_H},()=>[]); ampEmaxTrack=new Array(NUM_H).fill(null); phaseEstBeatHz=new Array(NUM_H).fill(null);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
-  viewLo=logScale?10:0; viewHi=4000;
+  viewLo=logScale?10:0; viewHi=4200;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
   if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
 }
@@ -1839,7 +1638,7 @@ document.getElementById("scale-toggle").addEventListener("click", function() {
   document.getElementById("scale-knob").style.left=logScale?"2px":"18px";
   // Reset view range on scale-mode switch so leftover zoom/scroll from
   // the other mode doesn't carry over and confuse the new scale.
-  viewLo=logScale?10:0; viewHi=4000;
+  viewLo=logScale?10:0; viewHi=4200;
   if (offCtx&&offCanvas) { offCtx.fillStyle="#000"; offCtx.fillRect(0,0,offCanvas.width,offCanvas.height); }
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
@@ -1860,26 +1659,39 @@ document.getElementById("view-toggle").addEventListener("click", function() {
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
 
+// PHASE EST: OFF by default. This is an experimental, opt-in feature —
+// turning it off not only hides the estimate but also stops the
+// underlying computation and clears all tracked state, so it has zero
+// effect on the app when disabled (easy to fully "revert" by leaving
+// it off, without needing to remove any code).
+document.getElementById("phase-toggle").addEventListener("click", function() {
+  phaseEstMode = !phaseEstMode;
+  this.style.background = phaseEstMode ? "#2255aa" : "#333";
+  document.getElementById("phase-knob").style.left = phaseEstMode ? "18px" : "2px";
+  ampLinBuf = Array.from({length:NUM_H}, ()=>[]);
+  ampEmaxTrack = new Array(NUM_H).fill(null);
+  phaseEstBeatHz = new Array(NUM_H).fill(null);
+  updateBeatDisplay();
+});
+
 // Sustain Mode: OFF by default — duration tracking/display fully hidden.
 // ON — onset is auto-detected (ONSET_DB_THRESHOLD), but the elapsed
 // time is only frozen when the person taps the Stop button (manual,
 // since deciding "the sound has died out" is a judgment call better
 // left to the ear than a fixed dB floor).
-function resetSustainTimers() {
-  // Clears all in-progress/frozen sustain timers so nothing stale is
-  // left waiting. Used both when Sustain Mode is turned off and when
-  // the spectrogram view is double-tap-reset.
-  noteIsActive = new Array(NUM_H).fill(false);
-  noteOnsetTime = new Array(NUM_H).fill(null);
-  noteDuration = new Array(NUM_H).fill(null);
-  hysteresisOn = new Array(NUM_H).fill(false);
-}
 document.getElementById("sustain-toggle").addEventListener("click", function() {
   sustainMode = !sustainMode;
   this.style.background = sustainMode ? "#2255aa" : "#333";
   document.getElementById("sustain-knob").style.left = sustainMode ? "18px" : "2px";
   document.getElementById("btn-sustain-stop").style.display = sustainMode ? "inline-block" : "none";
-  if (!sustainMode) resetSustainTimers();
+  if (!sustainMode) {
+    // Turning sustain mode off clears all in-progress/frozen timers so
+    // nothing stale is waiting when it's turned back on later.
+    noteIsActive = new Array(NUM_H).fill(false);
+    noteOnsetTime = new Array(NUM_H).fill(null);
+    noteDuration = new Array(NUM_H).fill(null);
+    hysteresisOn = new Array(NUM_H).fill(false);
+  }
   updateBeatDisplay();
 });
 
