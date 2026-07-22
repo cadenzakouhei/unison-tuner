@@ -1316,6 +1316,12 @@ function renderLoop() {
 // 変更: 帯の太さはセル幅で確保しつつ、セル間はなだらかに補間する
 // だけなので広範囲のボケが発生せず、ノイズフロアの粒状感も残る。
 const DISPLAY_AGG = 3; // 集約するビン数(≒実効ビン幅 16Hz)。ズームイン時は自動的に1(生ビン)へ切替
+// ズームイン時の帯の見た目の太さ制御: 最寄りピークから片側この
+// デバイスpx数までは素の値、それを超えた分は1pxあたり下記dBずつ
+// 減衰させて帯の広がりを打ち切る。全体表示時(集約セル描画)の太さと
+// 概ね揃うよう片側8px(全幅約16px)に設定。
+const BAND_HALF_WIDTH_PX = 8;
+const BAND_EDGE_FALLOFF_DB_PER_PX = 2;
 function aggregateForDisplay(data, A) {
   const nOut = Math.ceil(data.length / A);
   const out = new Float32Array(nOut);
@@ -1372,16 +1378,34 @@ function drawSpectroColumn(binSize) {
   // pixel-per-Hz density is uniform so this choice is global; in LOG
   // mode it varies with frequency and is made per row.
   const dispAgg = aggregateForDisplay(fftData, DISPLAY_AGG);
-  const useRawLin = !logScale && estimatePixelsPerBin(H, binSize) > 4;
+  const ppbGlobal = estimatePixelsPerBin(H, binSize);
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const fbin=freq/binSize;
-    const useRaw = logScale ? (pixelsPerBinAt(freq, H, binSize) > 4) : useRawLin;
+    const ppbLocal = logScale ? pixelsPerBinAt(freq, H, binSize) : ppbGlobal;
+    const useRaw = ppbLocal > 4;
     let db;
     if (useRaw) {
       const bin0=Math.floor(fbin), frac=fbin-bin0;
       const s=(b)=>(b>=0&&b<fftData.length)?fftData[b]:-120;
       db = s(bin0)+(s(bin0+1)-s(bin0))*frac;
+      // Band-width limiter (zoomed view only): a real FFT peak spans
+      // several bins (window mainlobe), so once one bin covers many
+      // screen pixels, that natural spread inflates into a very fat
+      // on-screen band — far thicker than the reference look, and
+      // capable of smearing into the neighboring harmonic. Rows more
+      // than BAND_HALF_WIDTH_PX away (on screen) from the nearest
+      // local spectral peak get progressively attenuated, capping
+      // every band at a roughly constant visual thickness at any
+      // zoom level; where two peaks sit close together, each row is
+      // attenuated by distance to its NEAREST peak, so the bands
+      // taper off before merging instead of overlapping.
+      let mBin=Math.round(fbin), mDb=-Infinity;
+      const c=Math.round(fbin);
+      const s0=Math.max(0,c-8), e0=Math.min(fftData.length-1,c+8);
+      for (let j=s0;j<=e0;j++){ if(fftData[j]>mDb){mDb=fftData[j];mBin=j;} }
+      const overPx = Math.abs(fbin-mBin)*ppbLocal - BAND_HALF_WIDTH_PX;
+      if (overPx>0) db -= overPx*BAND_EDGE_FALLOFF_DB_PER_PX;
     } else {
       const x = fbin/DISPLAY_AGG - 0.5; // cell centers sit at (b+0.5)*AGG raw-bin positions
       const b0=Math.floor(x), frac=x-b0;
