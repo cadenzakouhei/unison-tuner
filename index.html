@@ -150,7 +150,6 @@ border-radius: 5px; padding: 3px 3px; text-align: center; transition: border-col
 .beat-card .bc-h { font-size: 8px; color: #ccc; }
 .beat-card .bc-val { font-size: 14px; font-weight: bold; line-height: 1.1; }
 .beat-card .bc-unit { font-size: 7px; color: #ccc; }
-.beat-card .bc-dur { font-size: 8px; color: #6a9; margin-top: 1px; }
 
 /* Controls */
 #controls {
@@ -272,6 +271,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   <div class="section-label">
     <span>Beat Frequency — Selected Harmonics</span>
     <div style="display:flex;align-items:center;gap:6px;">
+      <span id="sustain-counter" style="font-size:11px;color:#8ac6ff;display:none;">— s</span>
       <button id="btn-sustain-stop" class="ctrl-btn">⏹ STOP</button>
       <span id="sustain-label" style="font-size:10px;color:#ccc;">SUSTAIN</span>
       <div id="sustain-toggle" class="toggle-switch">
@@ -364,10 +364,15 @@ let lastBeatRate = new Array(NUM_H).fill(null);  // last computed beat/s
 let lastTroughDb = new Array(NUM_H).fill(null);  // dB value at the most recent local minimum of the envelope
 let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
-let noteDuration = new Array(NUM_H).fill(null);  // seconds from onset to the manual Stop (held until next note starts)
-let noteIsActive = new Array(NUM_H).fill(false); // whether this harmonic is currently being timed (sustain mode)
-let noteOnsetTime= new Array(NUM_H).fill(null);  // performance.now() timestamp when current note started sounding
-let hysteresisOn = new Array(NUM_H).fill(false); // latch: true once loud enough to start (sustain mode only)
+
+// Sustain Mode duration counter: a single global stopwatch (not
+// per-harmonic). Starts the moment the overall input level crosses
+// SUSTAIN_ONSET_DB, keeps running regardless of any harmonic
+// selection, and only stops when the STOP button is pressed.
+let sustainActive       = false; // true while actively counting (before Stop is pressed)
+let sustainOnsetTime    = null;  // performance.now() timestamp when the count started
+let sustainFrozenSeconds= null;  // elapsed seconds frozen at the last Stop press, shown until the next onset
+const SUSTAIN_ONSET_DB = -80; // overall input level that starts the count
 
 // Timeline view state: independent of Sustain Mode / harmonic selection.
 // Tracks, per harmonic, whether it's currently "sounding" (continuous bar)
@@ -379,8 +384,6 @@ const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief d
 
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
-const ONSET_DB_THRESHOLD = -40; // must reach at least this loud to be considered "sounding" (sustain start)
-const STOP_DB_THRESHOLD  = -75; // reference floor value (manual Stop button is the actual trigger in sustain mode)
 // Timeline view reuses the existing GAIN slider (spectroGain) for its
 // sensitivity, rather than a dedicated control — raising GAIN also
 // lowers the effective level needed for a harmonic to register as
@@ -478,7 +481,7 @@ for (let h = 0; h < NUM_H; h++) {
   card.className = "beat-card";
   card.id = "bcard"+h;
   card.style.display = "none";
-  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-dur" id="bcd${h}" style="display:none">— s</div>`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div>`;
   beatBarEl.appendChild(card);
   beatCards[h] = card;
 }
@@ -670,6 +673,7 @@ swrap.addEventListener("touchend", e => {
         resetSustainTimers();
         resetLevelHistory();
         updateBeatDisplay();
+        updateSustainCounter();
         lastSpectroTapTime = 0; // consume the double-tap so a 3rd tap doesn't chain into another reset
       } else {
         lastSpectroTapTime = now; lastSpectroTapX = t.clientX; lastSpectroTapY = t.clientY;
@@ -1143,6 +1147,15 @@ function renderLoop() {
   }
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
+  // Sustain Mode duration counter: single global stopwatch, starts
+  // the moment the overall input level crosses SUSTAIN_ONSET_DB.
+  // Independent of harmonic selection — runs off the same overall
+  // `peak` level used for the Input Level meter. No automatic stop:
+  // once started, it keeps counting until the Stop button is pressed.
+  if (sustainMode && !sustainActive && isFinite(peak) && peak >= SUSTAIN_ONSET_DB) {
+    sustainActive = true;
+    sustainOnsetTime = now;
+  }
   for (let h=0;h<NUM_H;h++) {
     const hfTheory=currentFreq?currentFreq*(h+1):null;
     const hf=hfTheory?refineHarmonicFreq(fftData,sr,hfTheory,h):null;
@@ -1172,23 +1185,6 @@ function renderLoop() {
     else if (timelineDbHeld[h] < timelineStopDb()) timelineOn[h] = false;
     // else: held level sits between the thresholds — keep whatever
     // on/off state it already had, avoiding flicker right at the edge.
-
-    // Sustain-mode duration tracking. Only runs when sustainMode is
-    // enabled — otherwise the whole feature is inert (matches the
-    // requirement that nothing is tracked/displayed until turned on).
-    // Onset is automatic (hysteresis latch at ONSET_DB_THRESHOLD), but
-    // there is no automatic stop: the person presses the Stop button
-    // once the sound has died away, which freezes the elapsed time.
-    if (sustainMode) {
-      if (!hysteresisOn[h] && curDb >= ONSET_DB_THRESHOLD) {
-        hysteresisOn[h] = true;
-      }
-      if (hysteresisOn[h] && !noteIsActive[h]) {
-        noteIsActive[h] = true;
-        noteOnsetTime[h] = now;
-        noteDuration[h] = null; // clear old frozen value now that a new note has begun
-      }
-    }
 
     if (result && result.type==="diff") {
       // Two distinct peaks → direct frequency-difference beat rate
@@ -1265,6 +1261,7 @@ function renderLoop() {
     drawTimelineColumn();
   }
   updateBeatDisplay();
+  updateSustainCounter();
   updateFreqAxisLabels();
 }
 
@@ -1513,11 +1510,9 @@ function updateFreqAxisLabels() {
 // ── Beat display ───────────────────────────────────────────
 function updateBeatDisplay() {
   let any=false;
-  const now=performance.now();
   for (let h=0;h<NUM_H;h++) {
     const on=selH[h], card=beatCards[h];
     const valEl=document.getElementById("bcv"+h);
-    const durEl=document.getElementById("bcd"+h);
     const hist=beatHistory[h], st=statusVals[h];
     card.style.display=on?"block":"none";
     if (!on) continue;
@@ -1529,24 +1524,22 @@ function updateBeatDisplay() {
       const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
       return Math.abs(avg)<0.005?"0.00":(avg>0?"+":"")+avg.toFixed(2);
     })();
-
-    // Duration display only applies in Sustain Mode. While the note is
-    // actively being timed, show the live elapsed time; once the Stop
-    // button freezes it, show the frozen value until the next onset.
-    if (!sustainMode) {
-      durEl.style.display = "none";
-    } else {
-      durEl.style.display = "block";
-      if (noteIsActive[h] && noteOnsetTime[h]!==null) {
-        durEl.textContent = ((now - noteOnsetTime[h])/1000).toFixed(1) + " s";
-      } else if (noteDuration[h]!==null) {
-        durEl.textContent = noteDuration[h].toFixed(1) + " s";
-      } else {
-        durEl.textContent = "— s";
-      }
-    }
   }
   document.getElementById("beat-bar-empty").style.display=any?"none":"block";
+}
+
+function updateSustainCounter() {
+  const el = document.getElementById("sustain-counter");
+  if (!el) return;
+  if (!sustainMode) { el.style.display = "none"; return; }
+  el.style.display = "inline-block";
+  if (sustainActive && sustainOnsetTime!==null) {
+    el.textContent = ((performance.now() - sustainOnsetTime)/1000).toFixed(1) + " s";
+  } else if (sustainFrozenSeconds!==null) {
+    el.textContent = sustainFrozenSeconds.toFixed(1) + " s";
+  } else {
+    el.textContent = "— s";
+  }
 }
 
 function toggleH(h) {
@@ -1751,11 +1744,12 @@ function resetState() {
   currentFreq=null; pendingFreq=null; pendingCount=0; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
-  noteDuration=new Array(NUM_H).fill(null); noteIsActive=new Array(NUM_H).fill(false); noteOnsetTime=new Array(NUM_H).fill(null); hysteresisOn=new Array(NUM_H).fill(false); lastTroughDb=new Array(NUM_H).fill(null);
+  lastTroughDb=new Array(NUM_H).fill(null);
+  resetSustainTimers();
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
   viewLo=logScale?10:0; viewHi=4000;
-  updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay();
+  updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay(); updateSustainCounter();
   if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
 }
 
@@ -1869,19 +1863,18 @@ document.getElementById("view-toggle").addEventListener("click", function() {
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
 
-// Sustain Mode: OFF by default — duration tracking/display fully hidden.
-// ON — onset is auto-detected (ONSET_DB_THRESHOLD), but the elapsed
-// time is only frozen when the person taps the Stop button (manual,
-// since deciding "the sound has died out" is a judgment call better
-// left to the ear than a fixed dB floor).
+// Sustain Mode: OFF by default — the counter is fully hidden. ON —
+// onset is auto-detected (SUSTAIN_ONSET_DB), but the elapsed time is
+// only frozen when the person taps the Stop button (manual, since
+// deciding "the sound has died out" is a judgment call better left to
+// the ear than a fixed dB floor).
 function resetSustainTimers() {
-  // Clears all in-progress/frozen sustain timers so nothing stale is
-  // left waiting. Used both when Sustain Mode is turned off and when
-  // the spectrogram view is double-tap-reset.
-  noteIsActive = new Array(NUM_H).fill(false);
-  noteOnsetTime = new Array(NUM_H).fill(null);
-  noteDuration = new Array(NUM_H).fill(null);
-  hysteresisOn = new Array(NUM_H).fill(false);
+  // Clears the sustain counter so nothing stale is left waiting. Used
+  // both when Sustain Mode is turned off and when the spectrogram
+  // view is double-tap-reset.
+  sustainActive = false;
+  sustainOnsetTime = null;
+  sustainFrozenSeconds = null;
 }
 document.getElementById("sustain-toggle").addEventListener("click", function() {
   sustainMode = !sustainMode;
@@ -1890,21 +1883,19 @@ document.getElementById("sustain-toggle").addEventListener("click", function() {
   document.getElementById("btn-sustain-stop").style.display = sustainMode ? "inline-block" : "none";
   if (!sustainMode) resetSustainTimers();
   updateBeatDisplay();
+  updateSustainCounter();
 });
 
-// Manual Stop: freezes the elapsed duration for every harmonic
-// currently being timed, and re-arms onset detection for the next note.
+// Manual Stop: freezes the elapsed count and re-arms onset detection
+// for the next strike.
 document.getElementById("btn-sustain-stop").addEventListener("click", function() {
-  const now = performance.now();
-  for (let h=0; h<NUM_H; h++) {
-    if (noteIsActive[h] && noteOnsetTime[h]!==null) {
-      noteDuration[h] = (now - noteOnsetTime[h]) / 1000;
-    }
-    noteIsActive[h] = false;
-    noteOnsetTime[h] = null;
-    hysteresisOn[h] = false;
+  if (sustainActive && sustainOnsetTime!==null) {
+    sustainFrozenSeconds = (performance.now() - sustainOnsetTime) / 1000;
   }
+  sustainActive = false;
+  sustainOnsetTime = null;
   updateBeatDisplay();
+  updateSustainCounter();
 });
 </script>
 
