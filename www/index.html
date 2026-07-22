@@ -398,6 +398,7 @@ function timelineStopDb()  { return timelineOnsetDb() - 1; }
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let analyserDisplay=null, fftDataDisplay=null;
 const DISPLAY_FFT_SIZE = 512; // reference app uses 256; 512 keeps slightly more resolution while still giving thick, sharp bands
+const DISPLAY_FFT_NOISE_FLOOR_OFFSET = 12; // dB compensation for the smaller FFT's higher noise floor (see drawSpectroColumn)
 let offCanvas=null, offCtx=null;
 let lastAxisUpdate = 0;
 let blackmanWin = null;
@@ -725,7 +726,7 @@ async function startMic() {
     // here instead of trying to fake the look via post-processing.
     analyserDisplay = audioCtx.createAnalyser();
     analyserDisplay.fftSize = DISPLAY_FFT_SIZE;
-    analyserDisplay.smoothingTimeConstant = 0.2;
+    analyserDisplay.smoothingTimeConstant = 0.35;
     fftDataDisplay = new Float32Array(analyserDisplay.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
@@ -1343,7 +1344,15 @@ function drawSpectroColumn() {
     const fbin=freq/binSizeDisplay;
     const bin0=Math.floor(fbin), frac=fbin-bin0;
     const s=(b)=>(b>=0&&b<fftDataDisplay.length)?fftDataDisplay[b]:-120;
-    const db = s(bin0)+(s(bin0+1)-s(bin0))*frac;
+    const dbRaw = s(bin0)+(s(bin0+1)-s(bin0))*frac;
+    // A 512-point FFT has ~12dB less processing gain than the
+    // previous 8192-point analysis (each halving of FFT size raises
+    // the per-bin noise floor by ~3dB), so its noise floor reads
+    // noticeably louder in absolute dB terms even though nothing
+    // about the actual room/signal changed. Without compensating,
+    // color-mapping this the same way as before washed the whole
+    // background out in bright yellow/orange instead of staying dark.
+    const db = dbRaw - DISPLAY_FFT_NOISE_FLOOR_OFFSET;
     const [r,g,b]=dbToRGB(db);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
