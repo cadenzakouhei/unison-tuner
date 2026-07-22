@@ -372,7 +372,7 @@ let ampNullCount = new Array(NUM_H).fill(0);
 let sustainActive       = false; // true while actively counting (before Stop is pressed)
 let sustainOnsetTime    = null;  // performance.now() timestamp when the count started
 let sustainFrozenSeconds= null;  // elapsed seconds frozen at the last Stop press, shown until the next onset
-const SUSTAIN_ONSET_DB = -80; // overall input level that starts the count
+const SUSTAIN_ONSET_DB = -40; // overall input level that starts the count
 
 // Timeline view state: independent of Sustain Mode / harmonic selection.
 // Tracks, per harmonic, whether it's currently "sounding" (continuous bar)
