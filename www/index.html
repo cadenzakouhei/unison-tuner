@@ -1307,42 +1307,36 @@ function renderLoop() {
 }
 
 // ── Spectrogram ────────────────────────────────────────────
-// ── 表示用の周波数方向ブロック集約 ─────────────────────────
-// 以前は±数ビンの重み付き移動平均で帯を太らせていたが、これは画面
-// 全体を柔らかくぼかす副作用があり、参考アプリのシャープで粒状感の
-// ある見た目と乖離していた。参考アプリの「太いのに鮮明」な描写は、
-// 実質的に粗いFFT解像度(大きなビン幅)で描いているのに近い。そこで
-// 平滑化ではなく「隣接AGGビンをリニア領域で1セルに集約」する方式に
-// 変更: 帯の太さはセル幅で確保しつつ、セル間はなだらかに補間する
-// だけなので広範囲のボケが発生せず、ノイズフロアの粒状感も残る。
-const DISPLAY_AGG = 3; // 集約するビン数(≒実効ビン幅 16Hz)。ズームイン時は自動的に1(生ビン)へ切替
-// ズームイン時の帯の見た目の太さ制御: 最寄りピークから片側この
-// デバイスpx数までは素の値、それを超えた分は1pxあたり下記dBずつ
-// 減衰させて帯の広がりを打ち切る。全体表示時(集約セル描画)の太さと
-// 概ね揃うよう片側8px(全幅約16px)に設定。
-const BAND_HALF_WIDTH_PX = 20;
-const BAND_EDGE_FALLOFF_DB_PER_PX = 1;
-function aggregateForDisplay(data, A) {
-  const nOut = Math.ceil(data.length / A);
-  const out = new Float32Array(nOut);
-  for (let b=0; b<nOut; b++) {
-    let sum=0, cnt=0;
-    const s=b*A, e=Math.min(data.length, s+A);
-    for (let j=s; j<e; j++) { sum += Math.pow(10, data[j]/20); cnt++; }
-    const avgLin = cnt>0 ? sum/cnt : 1e-12;
-    out[b] = 20*Math.log10(Math.max(avgLin, 1e-12));
+// ── 表示用「グロー」処理(ピーク優先の最大値ウィンドウ) ──────
+// 参考アプリの「太いのに鮮明」な描写は、画面全体を均等にぼかす
+// 移動平均では再現できない(ノイズフロアまで一緒にぼやける)。実際は
+// 強いピークだけがその明るさのまま周囲ににじみ、弱いノイズ同士の
+// 明るさはほぼ変わらない——という「ピーク優先のグロー」に近い。
+// これは「窓内の最大値」を採用することで再現できる: 強いビンの
+// 近くでは最大値=そのピーク自身の値がそのまま広い範囲に敷き詰め
+// られて太い帯になり、ノイズフロアでは近傍の最大値も似た低さの
+// ままなので粒状感が保たれる。
+// ウィンドウ半径(ビン数)は「画面上で一定の太さ」になるよう、その
+// 時のズーム率(1ビンが何pxか)から逆算する。ズームインするほど
+// 1ビンが多くのpxを占めるため必要なビン数は減り、十分ズームすると
+// 半径0(生ビンそのまま)になって元の周波数分解能で表示される。
+const TARGET_HALF_WIDTH_PX = 12; // 帯の片側の目標太さ(px)。参考アプリの見た目に合わせて調整可
+const MAX_WINDOW_RADIUS_BINS = 40; // 極端なズームアウトでも計算量が跳ね上がらないための上限
+function maxWindowForDisplay(data, radiusBins) {
+  if (radiusBins <= 0) return data;
+  const n = data.length;
+  const out = new Float32Array(n);
+  for (let i=0; i<n; i++) {
+    const s=Math.max(0,i-radiusBins), e=Math.min(n-1,i+radiusBins);
+    let m=-Infinity;
+    for (let j=s; j<=e; j++) if (data[j]>m) m=data[j];
+    out[i]=m;
   }
   return out;
 }
 
 // How many screen pixels one FFT bin currently spans AT A GIVEN
-// FREQUENCY, at the current zoom/scale. At the default zoomed-out
-// view a bin is only a couple pixels tall, so a few bins' worth of
-// smoothing/bleed reads as a pleasingly solid band; pinch-zoomed in,
-// that same bin count can span dozens of pixels, making bands look
-// bloated and overlapping neighboring harmonics. Scaling the
-// smoothing down as this value grows keeps the visual band thickness
-// roughly constant on screen regardless of zoom level.
+// FREQUENCY, at the current zoom/scale.
 function pixelsPerBinAt(freq, H, binSize) {
   const y1 = freqToY(freq, H);
   const y2 = freqToY(Math.min(viewHi, freq+binSize), H);
@@ -1367,51 +1361,33 @@ function drawSpectroColumn(binSize) {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
-  // Aggregated display cells (DISPLAY_AGG raw bins per cell) are
-  // precomputed once per column. Each row then interpolates between
-  // the two nearest CELLS — the cell width itself provides the band
-  // thickness, and since no averaging spans beyond a cell boundary,
-  // the noise floor keeps its sharp grain instead of being washed
-  // into soft gradients. When zoomed in far enough that a single raw
-  // bin already covers several screen pixels (ppb>4), raw bins are
-  // used directly so fine structure stays visible. In LIN mode
-  // pixel-per-Hz density is uniform so this choice is global; in LOG
-  // mode it varies with frequency and is made per row.
-  const dispAgg = aggregateForDisplay(fftData, DISPLAY_AGG);
-  const ppbGlobal = estimatePixelsPerBin(H, binSize);
+  // LIN mode: pixel-per-bin density is uniform across the view, so
+  // one max-window radius (and one precomputed array) is accurate for
+  // every row. LOG mode: density varies with frequency, so different
+  // rows need different radii — computed per row, with a small cache
+  // since many adjacent rows round to the same integer radius.
+  let dispLin=null;
+  const logCache = {};
+  if (!logScale) {
+    const ppb = estimatePixelsPerBin(H, binSize);
+    const radiusBins = Math.max(0, Math.min(MAX_WINDOW_RADIUS_BINS, Math.round(TARGET_HALF_WIDTH_PX/ppb)));
+    dispLin = maxWindowForDisplay(fftData, radiusBins);
+  }
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const fbin=freq/binSize;
-    const ppbLocal = logScale ? pixelsPerBinAt(freq, H, binSize) : ppbGlobal;
-    const useRaw = ppbLocal > 4;
-    let db;
-    if (useRaw) {
-      const bin0=Math.floor(fbin), frac=fbin-bin0;
-      const s=(b)=>(b>=0&&b<fftData.length)?fftData[b]:-120;
-      db = s(bin0)+(s(bin0+1)-s(bin0))*frac;
-      // Band-width limiter (zoomed view only): a real FFT peak spans
-      // several bins (window mainlobe), so once one bin covers many
-      // screen pixels, that natural spread inflates into a very fat
-      // on-screen band — far thicker than the reference look, and
-      // capable of smearing into the neighboring harmonic. Rows more
-      // than BAND_HALF_WIDTH_PX away (on screen) from the nearest
-      // local spectral peak get progressively attenuated, capping
-      // every band at a roughly constant visual thickness at any
-      // zoom level; where two peaks sit close together, each row is
-      // attenuated by distance to its NEAREST peak, so the bands
-      // taper off before merging instead of overlapping.
-      let mBin=Math.round(fbin), mDb=-Infinity;
-      const c=Math.round(fbin);
-      const s0=Math.max(0,c-8), e0=Math.min(fftData.length-1,c+8);
-      for (let j=s0;j<=e0;j++){ if(fftData[j]>mDb){mDb=fftData[j];mBin=j;} }
-      const overPx = Math.abs(fbin-mBin)*ppbLocal - BAND_HALF_WIDTH_PX;
-      if (overPx>0) db -= overPx*BAND_EDGE_FALLOFF_DB_PER_PX;
+    let disp;
+    if (logScale) {
+      const ppbLocal = pixelsPerBinAt(freq, H, binSize);
+      const radiusBins = Math.max(0, Math.min(MAX_WINDOW_RADIUS_BINS, Math.round(TARGET_HALF_WIDTH_PX/ppbLocal)));
+      if (!logCache[radiusBins]) logCache[radiusBins] = maxWindowForDisplay(fftData, radiusBins);
+      disp = logCache[radiusBins];
     } else {
-      const x = fbin/DISPLAY_AGG - 0.5; // cell centers sit at (b+0.5)*AGG raw-bin positions
-      const b0=Math.floor(x), frac=x-b0;
-      const s=(b)=>(b>=0&&b<dispAgg.length)?dispAgg[b]:-120;
-      db = s(b0)+(s(b0+1)-s(b0))*frac;
+      disp = dispLin;
     }
+    const bin0=Math.floor(fbin), frac=fbin-bin0;
+    const s=(b)=>(b>=0&&b<disp.length)?disp[b]:-120;
+    const db = s(bin0)+(s(bin0+1)-s(bin0))*frac;
     const [r,g,b]=dbToRGB(db);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
