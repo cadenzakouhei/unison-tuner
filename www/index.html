@@ -372,6 +372,8 @@ let ampNullCount = new Array(NUM_H).fill(0);
 let sustainActive       = false; // true while actively counting (before Stop is pressed)
 let sustainOnsetTime    = null;  // performance.now() timestamp when the count started
 let sustainFrozenSeconds= null;  // elapsed seconds frozen at the last Stop press, shown until the next onset
+let sustainLevelHeld    = -96;   // slow-release held level, used to re-arm restart detection between strikes
+let sustainArmed        = true;  // true when ready to (re)start the count on the next threshold crossing
 const SUSTAIN_ONSET_DB = -40; // overall input level that starts the count
 
 // Timeline view state: independent of Sustain Mode / harmonic selection.
@@ -902,6 +904,32 @@ function detectPitch(data, sr, timeSamples) {
   }
   if (maxBin===0 || (data[maxBin]<-72 && !usedMissingFundamentalFallback)) return null;
 
+  // --- 高音域オーバーライド ---
+  // High piano notes (roughly A5 and up) have their fundamental as
+  // their own strongest partial. The HPS product, however, can latch
+  // onto a weak LOW bin instead, whenever the loud high note happens
+  // to sit at (or near) an integer multiple of that low bin — the
+  // real note's energy then "counts for" the bogus low candidate,
+  // with noise filling in its other harmonic slots. Detected symptom:
+  // playing a high note showed a low note's name (e.g. B2) while the
+  // spectrogram clearly showed one dominant peak around 1kHz+.
+  // Fix: find the strongest genuine local peak in the search range;
+  // if it's far louder (>18dB) than the HPS winner's own bin AND it
+  // sits in the high register (>500Hz) where fundamentals dominate,
+  // trust that peak as the fundamental directly.
+  if (!usedMissingFundamentalFallback) {
+    let strongestBin=-1, strongestDb=-Infinity;
+    for (let i=Math.max(1,lo); i<=hi; i++) {
+      if (data[i]>data[i-1] && data[i]>data[i+1] && data[i]>strongestDb) {
+        strongestDb=data[i]; strongestBin=i;
+      }
+    }
+    if (strongestBin>0 && strongestBin*binSize>500 &&
+        strongestDb > data[maxBin] + 18) {
+      maxBin = strongestBin;
+    }
+  }
+
   // --- オクターブ/倍音ロック補正 ---
   // 低音では基音binのエネルギーが弱く、強い倍音位置がHPSで
   // 誤って「基音」と判定されることがある(例: C2弾いてG3=3倍音と
@@ -1147,14 +1175,27 @@ function renderLoop() {
   }
   const binSize=sr/FFT_SIZE;
   const now=performance.now();
-  // Sustain Mode duration counter: single global stopwatch, starts
-  // the moment the overall input level crosses SUSTAIN_ONSET_DB.
-  // Independent of harmonic selection — runs off the same overall
-  // `peak` level used for the Input Level meter. No automatic stop:
-  // once started, it keeps counting until the Stop button is pressed.
-  if (sustainMode && !sustainActive && isFinite(peak) && peak >= SUSTAIN_ONSET_DB) {
-    sustainActive = true;
-    sustainOnsetTime = now;
+  // Sustain Mode duration counter: single global stopwatch. Starts
+  // (or RESTARTS from zero, even while already counting) each time
+  // the overall input level newly crosses SUSTAIN_ONSET_DB from
+  // below — i.e. every fresh key strike resets the count. A
+  // slow-release held level (same technique as the Timeline view)
+  // decides when the previous strike has decayed enough to re-arm,
+  // so the sustained ringing of the current note can't retrigger a
+  // restart by itself; only a genuinely new strike can. There is
+  // still no automatic stop: counting continues until the Stop
+  // button is pressed or a new strike restarts it.
+  if (sustainMode && isFinite(peak)) {
+    if (peak > sustainLevelHeld) sustainLevelHeld = peak;
+    else sustainLevelHeld = Math.max(-96, sustainLevelHeld - TIMELINE_RELEASE_DB_PER_FRAME);
+    if (sustainArmed && peak >= SUSTAIN_ONSET_DB) {
+      sustainActive = true;
+      sustainOnsetTime = now;
+      sustainFrozenSeconds = null;
+      sustainArmed = false;
+    } else if (!sustainArmed && sustainLevelHeld < SUSTAIN_ONSET_DB - 3) {
+      sustainArmed = true; // previous strike has decayed below the threshold — ready for the next one
+    }
   }
   for (let h=0;h<NUM_H;h++) {
     const hfTheory=currentFreq?currentFreq*(h+1):null;
@@ -1875,6 +1916,8 @@ function resetSustainTimers() {
   sustainActive = false;
   sustainOnsetTime = null;
   sustainFrozenSeconds = null;
+  sustainLevelHeld = -96;
+  sustainArmed = true;
 }
 document.getElementById("sustain-toggle").addEventListener("click", function() {
   sustainMode = !sustainMode;
