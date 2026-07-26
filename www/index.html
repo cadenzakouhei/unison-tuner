@@ -1412,7 +1412,10 @@ function renderLoop() {
       { const ekfRes = beatEkfStep(h, result.db, now);
         beatNextNodeSec[h] = ekfRes ? ekfRes.sec : null;
         beatEkfConfidentHz[h] = ekfRes ? ekfRes.rateHz : null; }
-      if (noteStartTime[h]===null) noteStartTime[h]=now;
+      if (noteStartTime[h]===null) {
+        noteStartTime[h]=now;
+        beatHistory[h]=[]; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
+      }
 
       ampEnv[h].push({t:now, db:result.db});
       while (ampEnv[h].length && now - ampEnv[h][0].t > ENV_KEEP_MS) ampEnv[h].shift();
@@ -1451,13 +1454,21 @@ function renderLoop() {
         }
       }
     } else {
-      // Nothing detected (silence / note has died out)
+      // Nothing detected (silence / note has died out). Only the
+      // internal tracking state resets here — ampEnv, timers, and the
+      // EKF's live model all need to start clean for the NEXT note.
+      // beatHistory / beatEkfConfidentHz / beatNextNodeSec (what's
+      // actually shown on screen) are deliberately left untouched, so
+      // a short-sustain note's last reading stays visible to read
+      // instead of vanishing back to "—" the instant it decays below
+      // the detection floor. They only get cleared once a genuinely
+      // new note starts (see noteStartTime[h]===null below).
       beatNullCount[h]++;
       ampNullCount[h]++;
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
-        beatHistory[h]=[]; statusVals[h]=0;
+        statusVals[h]=0;
         ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null; lastTroughDb[h]=null;
-        beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
+        beatEkf[h]=null;
       }
     }
   }
