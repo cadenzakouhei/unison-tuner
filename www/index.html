@@ -44,6 +44,26 @@ transition: all 0.15s; min-width: 76px; text-align: center;
 }
 #mic-btn.on { background: #0a1a2a; border-color: #2255aa; color: #88aaff; }
 
+#fullscreen-btn {
+position: fixed; top: calc(4px + env(safe-area-inset-top)); left: 12px; z-index: 1000;
+background: #1a1a2a; border: 1.5px solid #334;
+border-radius: 7px; color: #88aaff; font-size: 11px;
+font-family: -apple-system, sans-serif; padding: 3px 10px;
+cursor: pointer; -webkit-appearance: none;
+transition: all 0.15s; min-width: 60px; text-align: center;
+}
+#fullscreen-btn.active { background: #0a2a10; border-color: #00cc44; color: #00ff55; }
+
+/* Fullscreen spectrogram mode: hide everything else, spectrogram fills the screen */
+body.fullscreen-spectro #header,
+body.fullscreen-spectro #harmonic-select,
+body.fullscreen-spectro #bottom-overlay,
+body.fullscreen-spectro #level-history-section,
+body.fullscreen-spectro .section-label {
+  display: none !important;
+}
+body.fullscreen-spectro #spectro-section { flex: 1; }
+
 #info-bar {
 display: flex; align-items: center; gap: 14px;
 padding: 2px 2px;
@@ -202,6 +222,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
 </head>
 <body>
 
+<button id="fullscreen-btn">⛶ FULL</button>
 <div id="app-viewport">
 <div id="header">
   <div id="title-row">
@@ -284,12 +305,8 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   <div id="controls">
     <div class="ctrl-row">
       <span class="ctrl-label">GAIN</span>
-      <input type="range" id="sl-gain" min="10" max="90" step="1" value="20">
-      <span class="ctrl-val" id="vl-gain">20 dB</span>
-      <span id="agc-label" style="font-size:10px;color:#ccc;flex-shrink:0;">AGC</span>
-      <div id="agc-toggle" class="toggle-switch" style="background:#2255aa;">
-        <div id="agc-knob" class="toggle-knob" style="left:18px;"></div>
-      </div>
+      <input type="range" id="sl-gain" min="10" max="90" step="1" value="70">
+      <span class="ctrl-val" id="vl-gain">70 dB</span>
     </div>
     <div class="ctrl-row">
       <span class="ctrl-label">A4 REF</span>
@@ -334,11 +351,10 @@ const REF_PITCH_STEP    = 0.1;
 
 // ── Mutable state ──────────────────────────────────────────
 let micOn        = false;
-let agcEnabled   = true; // mic-level Automatic Gain Control (distinct from the GAIN slider below, which only affects spectrogram color/brightness) — defaults on to match the reference app
 const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050];
 let targetSampleRate = 16000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
-let spectroGain  = 20;  // match reference app 20.3dB
+let spectroGain  = 70;  // default gain
 let refPitch     = REF_PITCH_DEFAULT;
 let logScale     = false; // default linear like reference app
 let showTags     = true;  // whether H1–H8 harmonic frequency tags are drawn on the spectrogram
@@ -855,7 +871,7 @@ async function startMic() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) { alert("Web Audio API not supported."); return; }
     stream   = await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:agcEnabled}
+      audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}
     });
     audioCtx = new AC({sampleRate:targetSampleRate});
     if (audioCtx.state==="suspended") await audioCtx.resume();
@@ -1935,24 +1951,6 @@ document.getElementById("sl-gain").addEventListener("input", function() {
   document.getElementById("vl-gain").textContent=spectroGain+" dB";
 });
 
-// AGC: mic-level Automatic Gain Control, independent of the GAIN
-// slider above (which only affects spectrogram color/brightness).
-// Applied live via applyConstraints() if the mic is already running,
-// so no restart is needed; otherwise the new value is simply picked
-// up the next time startMic() runs.
-document.getElementById("agc-toggle").addEventListener("click", async function() {
-  agcEnabled = !agcEnabled;
-  this.style.background = agcEnabled ? "#2255aa" : "#333";
-  document.getElementById("agc-knob").style.left = agcEnabled ? "18px" : "2px";
-  if (stream) {
-    const track = stream.getAudioTracks()[0];
-    if (track && track.applyConstraints) {
-      try { await track.applyConstraints({autoGainControl: agcEnabled}); }
-      catch(e) { /* live constraint change not supported on this device — takes effect next MIC ON instead */ }
-    }
-  }
-});
-
 // Sample rate: AudioContext sample rate is fixed at creation, so
 // changing it restarts the mic if it's currently on. Lower rates cap
 // the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means
@@ -2037,6 +2035,18 @@ function attachTap(btnId, stepFn, holdRepeat) {
 attachTap("btn-ref-down",  ()=>setRefPitch(refPitch - REF_PITCH_STEP), true);
 attachTap("btn-ref-up",    ()=>setRefPitch(refPitch + REF_PITCH_STEP), true);
 attachTap("btn-ref-reset", ()=>setRefPitch(REF_PITCH_DEFAULT), false);
+
+let fullscreenMode = false;
+document.getElementById("fullscreen-btn").addEventListener("click", function() {
+  fullscreenMode = !fullscreenMode;
+  document.body.classList.toggle("fullscreen-spectro", fullscreenMode);
+  this.textContent = fullscreenMode ? "⤢ EXIT" : "⛶ FULL";
+  this.className = fullscreenMode ? "active" : "";
+  // The spectrogram's available height just changed — re-measure and
+  // rebuild the canvas backing buffers to match, same as toggling a
+  // harmonic selection does.
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initTimelineCanvas(); }));
+});
 
 document.getElementById("tags-toggle").addEventListener("click", function() {
   showTags=!showTags;
