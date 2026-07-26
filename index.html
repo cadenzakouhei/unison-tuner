@@ -170,7 +170,6 @@ border-radius: 5px; padding: 3px 3px; text-align: center; transition: border-col
 .beat-card .bc-h { font-size: 8px; color: #ccc; }
 .beat-card .bc-val { font-size: 14px; font-weight: bold; line-height: 1.1; }
 .beat-card .bc-unit { font-size: 7px; color: #ccc; }
-.beat-card .bc-node { font-size: 8px; color: #8ac6ff; margin-top: 1px; }
 
 /* Controls */
 #controls {
@@ -389,147 +388,6 @@ let lastTroughDb = new Array(NUM_H).fill(null);  // dB value at the most recent 
 let noteStartTime= new Array(NUM_H).fill(null);  // when this harmonic's envelope tracking began (for first-peak fallback)
 let ampNullCount = new Array(NUM_H).fill(0);
 
-// EKF-based "seconds until next beat node" estimator, per harmonic.
-// State x = [phi, Omega, lnA, alpha]:
-//   phi   = instantaneous phase (rad) of cos(Omega*t + phi0) in the
-//           envelope model A0*e^(-alpha*t)*|cos(Omega*t+phi0)|
-//   Omega = angular beat rate (rad/s); node-to-node interval = pi/Omega
-//   lnA   = natural log of the current (undecayed-at-this-instant)
-//           envelope base amplitude
-//   alpha = decay rate (1/s)
-// Unlike the earlier PHASE EST feature (which showed a raw
-// instantaneous derivative estimate and was too jumpy to read), this
-// tracks uncertainty (P) and only surfaces a "seconds to next node"
-// readout once the beat-rate estimate has actually settled down.
-let beatEkf = Array.from({length:NUM_H}, ()=>null); // null until (re)initialized for the current note
-const EKF_Q_PHI=1e-4, EKF_Q_OMEGA=2e-4, EKF_Q_LNA=1e-3, EKF_Q_ALPHA=5e-4; // process noise
-const EKF_R = 0.05; // observation noise (log-amplitude)
-const EKF_OMEGA_MIN = 2*Math.PI*0.01, EKF_OMEGA_MAX = 2*Math.PI*8; // clamp beat rate to 0.01–8 Hz
-const EKF_CONFIDENCE_RATIO = 0.25; // require Omega's std-dev to be under 25% of its value before displaying a prediction
-const EKF_MIN_SAMPLES = 30; // also require this many update steps first (~0.5s at 60fps) before trusting anything
-
-function beatEkfInit(db, now) {
-  const lin = Math.pow(10, db/20);
-  return {
-    x: [0, Math.PI*2.0, Math.log(Math.max(lin,1e-9)), 0.15], // start assuming ~2Hz beat, mild decay; corrects quickly
-    P: [[1,0,0,0],[0,4,0,0],[0,0,4,0],[0,0,0,1]],
-    lastT: now,
-    samples: 0,
-  };
-}
-
-// Runs one EKF predict+update step for harmonic h given a new
-// amplitude-envelope observation (db, at time now in ms). Returns
-// the seconds-to-next-node estimate, or null if not yet confident.
-function beatEkfStep(h, db, nowMs) {
-  const now = nowMs/1000;
-  let s = beatEkf[h];
-  if (!s) { beatEkf[h] = beatEkfInit(db, now); return null; }
-  const dt = Math.max(0.001, Math.min(0.5, now - s.lastT));
-  s.lastT = now;
-  let [phi, Om, lnA, al] = s.x;
-  const P = s.P;
-
-  // ── Predict ──
-  const phiP = phi + Om*dt;
-  const OmP  = Om;
-  const lnAP = lnA - al*dt;
-  const alP  = al;
-  // F = d(f)/d(x), process Jacobian
-  const F = [
-    [1, dt, 0, 0],
-    [0, 1,  0, 0],
-    [0, 0,  1, -dt],
-    [0, 0,  0, 1],
-  ];
-  const Q = [
-    [EKF_Q_PHI,0,0,0], [0,EKF_Q_OMEGA,0,0], [0,0,EKF_Q_LNA,0], [0,0,0,EKF_Q_ALPHA]
-  ];
-  // P = F P F^T + Q
-  const FP = mat4mul(F, P);
-  const FPFt = mat4mul(FP, mat4transpose(F));
-  const Ppred = mat4add(FPFt, Q);
-
-  // ── Update ──
-  const cosPhi = Math.cos(phiP);
-  const absCos = Math.max(1e-4, Math.abs(cosPhi));
-  const hx = lnAP + Math.log(absCos);
-  const lin = Math.pow(10, db/20);
-  const z = Math.log(Math.max(lin,1e-9));
-  const y = z - hx;
-  // dh/dphi = -tan(phi) (derivative of ln|cos(phi)|), clamped to avoid blowup near nodes
-  const dhdphi = Math.max(-50, Math.min(50, -Math.tan(phiP)));
-  const H = [dhdphi, 0, 1, 0];
-  // S = H P H^T + R (scalar)
-  const PHt = [
-    Ppred[0][0]*H[0]+Ppred[0][1]*H[1]+Ppred[0][2]*H[2]+Ppred[0][3]*H[3],
-    Ppred[1][0]*H[0]+Ppred[1][1]*H[1]+Ppred[1][2]*H[2]+Ppred[1][3]*H[3],
-    Ppred[2][0]*H[0]+Ppred[2][1]*H[1]+Ppred[2][2]*H[2]+Ppred[2][3]*H[3],
-    Ppred[3][0]*H[0]+Ppred[3][1]*H[1]+Ppred[3][2]*H[2]+Ppred[3][3]*H[3],
-  ];
-  const S = H[0]*PHt[0]+H[1]*PHt[1]+H[2]*PHt[2]+H[3]*PHt[3] + EKF_R;
-  const K = [PHt[0]/S, PHt[1]/S, PHt[2]/S, PHt[3]/S];
-
-  let phiN = phiP + K[0]*y;
-  let OmN  = Math.max(EKF_OMEGA_MIN, Math.min(EKF_OMEGA_MAX, OmP + K[1]*y));
-  let lnAN = lnAP + K[2]*y;
-  let alN  = Math.max(0, alP + K[3]*y);
-  // wrap phi to keep it bounded
-  phiN = ((phiN % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI);
-
-  // P = (I - K H) Ppred
-  const KH = [
-    [K[0]*H[0],K[0]*H[1],K[0]*H[2],K[0]*H[3]],
-    [K[1]*H[0],K[1]*H[1],K[1]*H[2],K[1]*H[3]],
-    [K[2]*H[0],K[2]*H[1],K[2]*H[2],K[2]*H[3]],
-    [K[3]*H[0],K[3]*H[1],K[3]*H[2],K[3]*H[3]],
-  ];
-  const IminusKH = [
-    [1-KH[0][0],-KH[0][1],-KH[0][2],-KH[0][3]],
-    [-KH[1][0],1-KH[1][1],-KH[1][2],-KH[1][3]],
-    [-KH[2][0],-KH[2][1],1-KH[2][2],-KH[2][3]],
-    [-KH[3][0],-KH[3][1],-KH[3][2],1-KH[3][3]],
-  ];
-  const Pnew = mat4mul(IminusKH, Ppred);
-
-  s.x = [phiN, OmN, lnAN, alN];
-  s.P = Pnew;
-  s.samples++;
-
-  // Confidence gate: only report once the beat-rate estimate has settled.
-  const omegaStd = Math.sqrt(Math.max(0, Pnew[1][1]));
-  if (s.samples < EKF_MIN_SAMPLES || omegaStd > EKF_CONFIDENCE_RATIO*OmN) return null;
-
-  // Seconds to next node: |cos(phi)| hits zero every time phi crosses
-  // pi/2 + k*pi. Find the smallest positive phase distance from the
-  // current (mod-pi) phase to pi/2, then convert via the angular rate.
-  const phiModPi = ((phiN % Math.PI) + Math.PI) % Math.PI;
-  const deltaPhase = ((Math.PI/2 - phiModPi) + Math.PI) % Math.PI;
-  return { sec: deltaPhase / OmN, rateHz: OmN/Math.PI };
-}
-
-function mat4mul(A,B) {
-  const R=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
-  for (let i=0;i<4;i++) for (let j=0;j<4;j++) {
-    let sum=0;
-    for (let k=0;k<4;k++) sum += A[i][k]*B[k][j];
-    R[i][j]=sum;
-  }
-  return R;
-}
-function mat4transpose(A) {
-  const R=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
-  for (let i=0;i<4;i++) for (let j=0;j<4;j++) R[i][j]=A[j][i];
-  return R;
-}
-function mat4add(A,B) {
-  const R=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
-  for (let i=0;i<4;i++) for (let j=0;j<4;j++) R[i][j]=A[i][j]+B[i][j];
-  return R;
-}
-let beatNextNodeSec = new Array(NUM_H).fill(null); // latest displayed estimate per harmonic
-let beatEkfConfidentHz = new Array(NUM_H).fill(null); // EKF-fitted beat rate (Hz), only set once confident
-
 
 // Sustain Mode duration counter: a single global stopwatch (not
 // per-harmonic). Starts the moment the overall input level crosses
@@ -652,7 +510,7 @@ for (let h = 0; h < NUM_H; h++) {
   card.className = "beat-card";
   card.id = "bcard"+h;
   card.style.display = "none";
-  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div><div class="bc-node" id="bcn${h}">次の節: —</div>`;
+  card.innerHTML = `<div class="bc-h">H${h+1}</div><div class="bc-val" id="bcv${h}" style="color:#ddd">—</div><div class="bc-unit">beat/s</div>`;
   beatBarEl.appendChild(card);
   beatCards[h] = card;
 }
@@ -1418,19 +1276,15 @@ function renderLoop() {
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
       // Reset envelope tracking since we're in diff mode now
       ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null;
-      beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
     } else if (result && result.type==="amp" && selH[h] && result.db >= SUSTAIN_ONSET_DB) {
       // Single peak in frequency domain → this harmonic is "beating"
       // in amplitude over time. Track its envelope and measure the
       // time between successive envelope peaks directly.
       beatNullCount[h]=0;
       ampNullCount[h]=0;
-      { const ekfRes = beatEkfStep(h, result.db, now);
-        beatNextNodeSec[h] = ekfRes ? ekfRes.sec : null;
-        beatEkfConfidentHz[h] = ekfRes ? ekfRes.rateHz : null; }
       if (noteStartTime[h]===null) {
         noteStartTime[h]=now;
-        beatHistory[h]=[]; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
+        beatHistory[h]=[];
       }
 
       ampEnv[h].push({t:now, db:result.db});
@@ -1471,20 +1325,18 @@ function renderLoop() {
       }
     } else {
       // Nothing detected (silence / note has died out). Only the
-      // internal tracking state resets here — ampEnv, timers, and the
-      // EKF's live model all need to start clean for the NEXT note.
-      // beatHistory / beatEkfConfidentHz / beatNextNodeSec (what's
-      // actually shown on screen) are deliberately left untouched, so
-      // a short-sustain note's last reading stays visible to read
-      // instead of vanishing back to "—" the instant it decays below
-      // the detection floor. They only get cleared once a genuinely
-      // new note starts (see noteStartTime[h]===null below).
+      // internal tracking state resets here — ampEnv and timers need
+      // to start clean for the NEXT note. beatHistory (what's shown
+      // on screen) is deliberately left untouched, so a short-sustain
+      // note's last reading stays visible to read instead of
+      // vanishing back to "—" the instant it decays below the
+      // detection floor. It only gets cleared once a genuinely new
+      // note starts (see noteStartTime[h]===null below).
       beatNullCount[h]++;
       ampNullCount[h]++;
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
         statusVals[h]=0;
         ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null; lastTroughDb[h]=null;
-        beatEkf[h]=null;
       }
     }
   }
@@ -1687,26 +1539,10 @@ function updateBeatDisplay() {
     const col=st===2?"#00ff55":st===1?"#ffdd00":"#ff8844";
     card.style.borderColor=st===2?"#00cc44":st===1?"#cc9900":"#333";
     valEl.style.color=col;
-    valEl.textContent=(()=>{
-      // EKF fits the whole decaying-cosine shape, so it's less prone
-      // to double-counting extra wiggles (attack transients, complex
-      // multi-string envelopes) than simple peak-to-peak timing. Use
-      // it once it's had time to converge; fall back to the peak-
-      // history average before that, or in diff-mode where the EKF
-      // doesn't run.
-      const ekfHz = beatEkfConfidentHz[h];
-      if (ekfHz !== null && ekfHz !== undefined) {
-        return Math.abs(ekfHz)<0.005 ? "0.00" : "+"+ekfHz.toFixed(2);
-      }
-      if (hist.length===0) return "—";
+    valEl.textContent=hist.length===0?"—":(()=>{
       const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
       return Math.abs(avg)<0.005?"0.00":(avg>0?"+":"")+avg.toFixed(2);
     })();
-    const nodeEl=document.getElementById("bcn"+h);
-    if (nodeEl) {
-      const sec = beatNextNodeSec[h];
-      nodeEl.textContent = (sec===null||sec===undefined) ? "次の節: —" : "次の節: "+sec.toFixed(1)+"s";
-    }
   }
   document.getElementById("beat-bar-empty").style.display=any?"none":"block";
 }
@@ -1728,7 +1564,6 @@ function updateSustainCounter() {
 function toggleH(h) {
   selH[h]=!selH[h];
   hsBtns[h].className="hs-btn"+(selH[h]?" selected":"");
-  beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
   // Hide GAIN/A4 REF sliders while any harmonic is selected, so the
   // spectrogram keeps maximum vertical space instead of being squeezed.
   const anySelected = selH.some(v=>v);
@@ -1936,7 +1771,6 @@ function resetState() {
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
-  beatEkf=Array.from({length:NUM_H},()=>null); beatNextNodeSec=new Array(NUM_H).fill(null); beatEkfConfidentHz=new Array(NUM_H).fill(null);
   resetSustainTimers();
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
