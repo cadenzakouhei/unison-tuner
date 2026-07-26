@@ -489,7 +489,7 @@ function beatEkfStep(h, db, nowMs) {
   // current (mod-pi) phase to pi/2, then convert via the angular rate.
   const phiModPi = ((phiN % Math.PI) + Math.PI) % Math.PI;
   const deltaPhase = ((Math.PI/2 - phiModPi) + Math.PI) % Math.PI;
-  return deltaPhase / OmN;
+  return { sec: deltaPhase / OmN, rateHz: OmN/Math.PI };
 }
 
 function mat4mul(A,B) {
@@ -512,6 +512,7 @@ function mat4add(A,B) {
   return R;
 }
 let beatNextNodeSec = new Array(NUM_H).fill(null); // latest displayed estimate per harmonic
+let beatEkfConfidentHz = new Array(NUM_H).fill(null); // EKF-fitted beat rate (Hz), only set once confident
 
 
 // Sustain Mode duration counter: a single global stopwatch (not
@@ -1401,14 +1402,16 @@ function renderLoop() {
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
       // Reset envelope tracking since we're in diff mode now
       ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null;
-      beatEkf[h]=null; beatNextNodeSec[h]=null;
+      beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
     } else if (result && result.type==="amp" && selH[h]) {
       // Single peak in frequency domain → this harmonic is "beating"
       // in amplitude over time. Track its envelope and measure the
       // time between successive envelope peaks directly.
       beatNullCount[h]=0;
       ampNullCount[h]=0;
-      beatNextNodeSec[h] = beatEkfStep(h, result.db, now);
+      { const ekfRes = beatEkfStep(h, result.db, now);
+        beatNextNodeSec[h] = ekfRes ? ekfRes.sec : null;
+        beatEkfConfidentHz[h] = ekfRes ? ekfRes.rateHz : null; }
       if (noteStartTime[h]===null) noteStartTime[h]=now;
 
       ampEnv[h].push({t:now, db:result.db});
@@ -1454,7 +1457,7 @@ function renderLoop() {
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
         beatHistory[h]=[]; statusVals[h]=0;
         ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null; lastTroughDb[h]=null;
-        beatEkf[h]=null; beatNextNodeSec[h]=null;
+        beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
       }
     }
   }
@@ -1657,7 +1660,18 @@ function updateBeatDisplay() {
     const col=st===2?"#00ff55":st===1?"#ffdd00":"#ff8844";
     card.style.borderColor=st===2?"#00cc44":st===1?"#cc9900":"#333";
     valEl.style.color=col;
-    valEl.textContent=hist.length===0?"—":(()=>{
+    valEl.textContent=(()=>{
+      // EKF fits the whole decaying-cosine shape, so it's less prone
+      // to double-counting extra wiggles (attack transients, complex
+      // multi-string envelopes) than simple peak-to-peak timing. Use
+      // it once it's had time to converge; fall back to the peak-
+      // history average before that, or in diff-mode where the EKF
+      // doesn't run.
+      const ekfHz = beatEkfConfidentHz[h];
+      if (ekfHz !== null && ekfHz !== undefined) {
+        return Math.abs(ekfHz)<0.005 ? "0.00" : "+"+ekfHz.toFixed(2);
+      }
+      if (hist.length===0) return "—";
       const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
       return Math.abs(avg)<0.005?"0.00":(avg>0?"+":"")+avg.toFixed(2);
     })();
@@ -1687,7 +1701,7 @@ function updateSustainCounter() {
 function toggleH(h) {
   selH[h]=!selH[h];
   hsBtns[h].className="hs-btn"+(selH[h]?" selected":"");
-  beatEkf[h]=null; beatNextNodeSec[h]=null;
+  beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
   // Hide GAIN/A4 REF sliders while any harmonic is selected, so the
   // spectrogram keeps maximum vertical space instead of being squeezed.
   const anySelected = selH.some(v=>v);
@@ -1895,7 +1909,7 @@ function resetState() {
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
-  beatEkf=Array.from({length:NUM_H},()=>null); beatNextNodeSec=new Array(NUM_H).fill(null);
+  beatEkf=Array.from({length:NUM_H},()=>null); beatNextNodeSec=new Array(NUM_H).fill(null); beatEkfConfidentHz=new Array(NUM_H).fill(null);
   resetSustainTimers();
   timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
