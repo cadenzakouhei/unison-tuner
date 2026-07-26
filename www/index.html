@@ -236,7 +236,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <div id="view-toggle" class="toggle-switch">
       <div id="view-knob" class="toggle-knob"></div>
     </div>
-    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">44100 Hz</button>
+    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">16000 Hz</button>
   </div>
 </div>
 
@@ -335,8 +335,8 @@ const REF_PITCH_STEP    = 0.1;
 // ── Mutable state ──────────────────────────────────────────
 let micOn        = false;
 let agcEnabled   = true; // mic-level Automatic Gain Control (distinct from the GAIN slider below, which only affects spectrogram color/brightness) — defaults on to match the reference app
-const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050, 44100];
-let targetSampleRate = 44100; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
+const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050];
+let targetSampleRate = 16000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
 let spectroGain  = 20;  // match reference app 20.3dB
 let refPitch     = REF_PITCH_DEFAULT;
@@ -1403,7 +1403,7 @@ function renderLoop() {
       // Reset envelope tracking since we're in diff mode now
       ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null;
       beatEkf[h]=null; beatNextNodeSec[h]=null; beatEkfConfidentHz[h]=null;
-    } else if (result && result.type==="amp" && selH[h]) {
+    } else if (result && result.type==="amp" && selH[h] && result.db >= SUSTAIN_ONSET_DB) {
       // Single peak in frequency domain → this harmonic is "beating"
       // in amplitude over time. Track its envelope and measure the
       // time between successive envelope peaks directly.
