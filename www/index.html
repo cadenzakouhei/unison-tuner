@@ -1059,6 +1059,13 @@ function refineHarmonicFreq(data, sr, theoreticalFreq, h) {
   return bestBin<0 ? theoreticalFreq : bestBin*binSize;
 }
 
+// Minimum Hz separation for two spectral peaks to be treated as two
+// genuinely distinct (beating) strings rather than one peak's own
+// window sidelobe structure. Calibrated at the sample rate this app
+// originally used (44100Hz, where it corresponded to ~4 bins);
+// expressed directly in Hz so it stays meaningful regardless of the
+// selected sample rate.
+const MIN_DIFF_SEP_HZ = 20;
 function detectBeat(data, sr, hFreq) {
   if (!hFreq) return null;
   const binSize=sr/FFT_SIZE;
@@ -1082,9 +1089,17 @@ function detectBeat(data, sr, hFreq) {
     const top2 = [peaks[0], peaks[1]];
     top2.sort((a,b)=>a.f-b.f);
     const sepHz   = top2[1].f - top2[0].f;
-    const sepBins = sepHz / binSize;
     const lvlDiff = Math.abs(peaks[0].v - peaks[1].v); // dB difference
-    if (sepBins >= 4 && lvlDiff <= 10) {
+    // Minimum separation is a fixed Hz value, NOT a bin count — bin
+    // width shrinks with sample rate (binSize = sr/FFT_SIZE), and a
+    // fixed bin-count threshold silently became far too permissive
+    // once the sample rate default dropped to 8000Hz: at 44100Hz, 4
+    // bins was ~21.5Hz (a reasonable gate against a single peak's own
+    // window sidelobes); at 8000Hz the same 4 bins was only ~3.9Hz,
+    // easily satisfied by ordinary sidelobe texture from ONE real
+    // peak, causing spurious high "beat" readings on notes that
+    // weren't actually beating.
+    if (sepHz >= MIN_DIFF_SEP_HZ && lvlDiff <= 10) {
       // Determine direction: the peak above the theoretical reference
       // frequency (hFreq) is taken to be the string being tuned/moved.
       // If that peak sits above hFreq, the beat is reported as
