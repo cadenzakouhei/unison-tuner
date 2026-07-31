@@ -298,6 +298,10 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
       <div id="sustain-toggle" class="toggle-switch">
         <div id="sustain-knob" class="toggle-knob"></div>
       </div>
+      <span id="noise-label" style="font-size:10px;color:#ccc;">NOISE</span>
+      <div id="noise-toggle" class="toggle-switch">
+        <div id="noise-knob" class="toggle-knob"></div>
+      </div>
     </div>
   </div>
   <div id="beat-bar"><span id="beat-bar-empty">Select a harmonic above to show beat frequency</span></div>
@@ -421,6 +425,35 @@ function timelineStopDb()  { return timelineOnsetDb() - 1; }
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let analyserDisplay=null, fftDataDisplay=null;
+// Noise profile subtraction: captures a short average of the room's
+// steady background noise (in linear amplitude, per display-FFT bin),
+// then subtracts it from every subsequent frame before color-mapping.
+// Effective against constant background noise (fans, hum); has no
+// effect on transient noise and needs re-capturing if the environment
+// changes. Off by default.
+let noiseFilterOn = false;
+let noiseProfile = null;       // Float32Array, linear amplitude per bin
+let noiseCapturing = false;
+let noiseCaptureAccum = null;  // Float32Array accumulator (linear)
+let noiseCaptureCount = 0;
+const NOISE_CAPTURE_FRAMES = 60; // ~1 second at 60fps
+function noiseStartCapture() {
+  noiseCapturing = true;
+  noiseCaptureAccum = null;
+  noiseCaptureCount = 0;
+}
+function noiseApplyProfile(data) {
+  if (!noiseFilterOn || !noiseProfile) return data;
+  const n = data.length;
+  const out = new Float32Array(n);
+  for (let i=0; i<n; i++) {
+    const lin = Math.pow(10, data[i]/20);
+    const noiseLin = i<noiseProfile.length ? noiseProfile[i] : 0;
+    const clean = Math.max(1e-9, lin - noiseLin);
+    out[i] = 20*Math.log10(clean);
+  }
+  return out;
+}
 const DISPLAY_FFT_SIZE = 512; // reference app uses 256; 512 keeps slightly more resolution while still giving thick, sharp bands
 const DISPLAY_FFT_NOISE_FLOOR_OFFSET = 22; // dB compensation for the smaller FFT's higher noise floor (see drawSpectroColumn) — raised further to darken the background
 let offCanvas=null, offCtx=null;
@@ -579,7 +612,23 @@ requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHis
 // idempotent).
 setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 300);
 setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 1000);
-window.addEventListener("resize", ()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); });
+function reinitAllCanvases() { initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }
+window.addEventListener("resize", ()=>{
+  reinitAllCanvases();
+  // WKWebView can fire resize before the layout (safe-area insets,
+  // viewport dimensions) has fully settled — especially right after
+  // an orientation change — leaving the canvas measured against
+  // stale dimensions and touch/drag math silently broken until
+  // something else happens to trigger a re-init. A couple of delayed
+  // follow-ups catch that, same fix as the cold-launch canvas-sizing
+  // race condition.
+  setTimeout(reinitAllCanvases, 150);
+  setTimeout(reinitAllCanvases, 500);
+});
+window.addEventListener("orientationchange", ()=>{
+  setTimeout(reinitAllCanvases, 150);
+  setTimeout(reinitAllCanvases, 500);
+});
 
 // ── Touch: 1-finger scroll + pinch zoom ───────────────────
 let pinchDist0=null, pinchLo0=null, pinchHi0=null, pinchCF=null;
@@ -1195,6 +1244,23 @@ function renderLoop() {
   analyser.getFloatFrequencyData(fftData);
   analyser.getFloatTimeDomainData(timeData);
   if (analyserDisplay && fftDataDisplay) analyserDisplay.getFloatFrequencyData(fftDataDisplay);
+  if (noiseCapturing && fftDataDisplay) {
+    if (!noiseCaptureAccum) noiseCaptureAccum = new Float32Array(fftDataDisplay.length);
+    for (let i=0; i<fftDataDisplay.length; i++) noiseCaptureAccum[i] += Math.pow(10, fftDataDisplay[i]/20);
+    noiseCaptureCount++;
+    const el = document.getElementById("noise-label");
+    if (el) el.textContent = "NOISE " + Math.ceil(100*noiseCaptureCount/NOISE_CAPTURE_FRAMES) + "%";
+    if (noiseCaptureCount >= NOISE_CAPTURE_FRAMES) {
+      noiseProfile = new Float32Array(fftDataDisplay.length);
+      for (let i=0; i<fftDataDisplay.length; i++) noiseProfile[i] = noiseCaptureAccum[i]/noiseCaptureCount;
+      noiseCapturing = false; noiseCaptureAccum = null; noiseCaptureCount = 0;
+      noiseFilterOn = true;
+      const t = document.getElementById("noise-toggle"), k = document.getElementById("noise-knob");
+      if (t) t.style.background = "#2255aa";
+      if (k) k.style.left = "18px";
+      if (el) el.textContent = "NOISE";
+    }
+  }
   let peak=-Infinity;
   for (let i=0;i<fftData.length;i++) if(fftData[i]>peak) peak=fftData[i];
   updateLevel(peak);
@@ -1388,11 +1454,12 @@ function drawSpectroColumn() {
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
   const binSizeDisplay = (audioCtx?.sampleRate||44100) / DISPLAY_FFT_SIZE;
+  const dispData = noiseApplyProfile(fftDataDisplay);
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const fbin=freq/binSizeDisplay;
     const bin0=Math.floor(fbin), frac=fbin-bin0;
-    const s=(b)=>(b>=0&&b<fftDataDisplay.length)?fftDataDisplay[b]:-120;
+    const s=(b)=>(b>=0&&b<dispData.length)?dispData[b]:-120;
     const dbRaw = s(bin0)+(s(bin0+1)-s(bin0))*frac;
     // A 512-point FFT has ~12dB less processing gain than the
     // previous 8192-point analysis (each halving of FFT size raises
@@ -1954,6 +2021,37 @@ document.getElementById("sustain-toggle").addEventListener("click", function() {
   if (!sustainMode) resetSustainTimers();
   updateBeatDisplay();
   updateSustainCounter();
+});
+
+// NOISE filter: single tap toggles it on/off. If turning on and no
+// profile has been captured yet, starts a ~1s capture first (label
+// shows progress), then enables automatically once done. Double-tap
+// the label to force a fresh re-capture at any time (e.g. after
+// moving to a different room).
+document.getElementById("noise-toggle").addEventListener("click", function() {
+  if (noiseCapturing) return; // ignore taps mid-capture
+  if (!noiseFilterOn) {
+    if (noiseProfile) {
+      noiseFilterOn = true;
+      this.style.background = "#2255aa";
+      document.getElementById("noise-knob").style.left = "18px";
+    } else {
+      noiseStartCapture(); // auto-enables once the capture finishes
+    }
+  } else {
+    noiseFilterOn = false;
+    this.style.background = "#333";
+    document.getElementById("noise-knob").style.left = "2px";
+  }
+});
+document.getElementById("noise-label").addEventListener("dblclick", function() {
+  if (!noiseCapturing) noiseStartCapture();
+});
+let noiseLabelLastTap = 0;
+document.getElementById("noise-label").addEventListener("touchend", function(e) {
+  const t = Date.now();
+  if (t - noiseLabelLastTap < 350 && !noiseCapturing) { e.preventDefault(); noiseStartCapture(); }
+  noiseLabelLastTap = t;
 });
 
 // Manual Stop: freezes the elapsed count and re-arms onset detection
