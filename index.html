@@ -326,6 +326,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   <div class="section-label">
     <span>Sound Level</span>
     <div id="level-history-stats">
+      <span>MIN <b id="lvl-min" style="color:#4af">— dB</b></span>
       <span>AVG <b id="lvl-avg" style="color:#8f8">— dB</b></span>
       <span>MAX <b id="lvl-max" style="color:#f66">— dB</b></span>
     </div>
@@ -464,6 +465,7 @@ let blackmanWin = null;
 const levelHistCanvas = document.getElementById("level-history-canvas");
 const levelHistCtx    = levelHistCanvas.getContext("2d");
 let levelSum=0, levelCount=0; // AVG: unchanged, accumulates across the whole session
+let levelMin=null; // quietest single reading since the last reset, same scope as AVG
 let levelMaxCurrent=null;     // MAX: peak level of just the most recent key strike, reset on each new onset
 let levelHeld=-96, levelStrikeOn=false; // slow-release held level, used only to detect strike onset/offset
 
@@ -1720,12 +1722,15 @@ function updateNoteDisplay(freq) {
 // Math.abs(), where louder (closer to 0) actually gives a SMALLER
 // number.
 // LEVEL_CALIBRATION_DB roughly aligns the readout with a real SPL
-// meter: derived by comparing this app's per-strike MAX against a
-// reference sound-level-meter app measuring the same piano strikes
-// (76.3 here vs 116.6 there → ≈ +40dB). This is device-dependent
-// (iPhone mic sensitivity varies by model), so it's an approximation
-// for convenience, not a certified SPL measurement.
-const LEVEL_CALIBRATION_DB = 40;
+// meter: derived by comparing this app's AVG against a reference
+// sound-level-meter app's Leq/Avg, both measuring the same steady
+// ambient background over several seconds (53.4dB here vs 67.6dB
+// there → ≈ +54dB). Using a steady ambient reading rather than a
+// single strike's peak avoids timing/attack-transient mismatches
+// between the two apps. This is device-dependent (iPhone mic
+// sensitivity varies by model), so it's an approximation for
+// convenience, not a certified SPL measurement.
+const LEVEL_CALIBRATION_DB = 54;
 function dbToLevelScale(db) {
   return Math.max(0, db + 96 + LEVEL_CALIBRATION_DB);
 }
@@ -1816,6 +1821,12 @@ function updateLevelStats(db) {
   // number" intuitive.
   document.getElementById("lvl-avg").textContent = dbToLevelScale(levelSum/levelCount).toFixed(1)+" dB";
 
+  // MIN: quietest single reading since the last reset (session-wide,
+  // same scope as AVG) — the complement to AVG, showing how low the
+  // background got.
+  if (levelMin===null || db<levelMin) levelMin=db;
+  document.getElementById("lvl-min").textContent = dbToLevelScale(levelMin).toFixed(1)+" dB";
+
   // MAX: peak of just the current key strike, not an all-time running
   // max. Uses the same slow-release held-level technique as the
   // Timeline view to detect strike onset/offset (bridges brief
@@ -1839,9 +1850,10 @@ function updateLevelStats(db) {
   }
 }
 function resetLevelHistory() {
-  levelSum=0; levelCount=0; levelMaxCurrent=null; levelHeld=-96; levelStrikeOn=false;
+  levelSum=0; levelCount=0; levelMaxCurrent=null; levelHeld=-96; levelStrikeOn=false; levelMin=null;
   document.getElementById("lvl-max").textContent="— dB";
   document.getElementById("lvl-avg").textContent="— dB";
+  document.getElementById("lvl-min").textContent="— dB";
   if (levelHistCtx && levelHistCanvas.width) {
     levelHistCtx.fillStyle="#000";
     levelHistCtx.fillRect(0,0,levelHistCanvas.width,levelHistCanvas.height);
