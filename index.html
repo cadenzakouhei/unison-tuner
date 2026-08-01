@@ -1740,18 +1740,25 @@ function dbToLevelScale(db) {
 // maximum (full-scale raw signal) only reaches 96, so 100/120 sit in
 // a deliberate headroom band at the top of the chart — same idea as
 // the headroom above 0dBFS on a hardware level meter.
-const LEVEL_SCALE_MIN = 0, LEVEL_SCALE_MAX = 120, LEVEL_SCALE_STEP = 20;
+const LEVEL_SCALE_MIN = 20, LEVEL_SCALE_MAX = 130, LEVEL_SCALE_STEP = 10; // 10dB divides 110 evenly (11 steps), so every gridline is uniformly spaced with none left over
 function levelToY(levelVal, H) {
   return H * (1 - (levelVal - LEVEL_SCALE_MIN) / (LEVEL_SCALE_MAX - LEVEL_SCALE_MIN));
 }
 const levelRulerEl = document.getElementById("level-ruler");
+function levelGridValues() {
+  const vals = [];
+  for (let g=LEVEL_SCALE_MIN; g<LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) vals.push(g);
+  vals.push(LEVEL_SCALE_MAX); // always show the exact top of the scale, even if it doesn't fall on a normal step
+  return vals;
+}
+
 function updateLevelRulerLabels() {
   if (!levelRulerEl) return;
   levelRulerEl.innerHTML = "";
   const H = levelHistCanvas.clientHeight || 300;
   if (H < 10) return;
   const LABEL_MARGIN = 9;
-  for (let g=LEVEL_SCALE_MIN; g<=LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) {
+  levelGridValues().forEach(g => {
     const y = levelToY(g, H);
     const clampedY = Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y));
     const tick=document.createElement("div");
@@ -1763,7 +1770,7 @@ function updateLevelRulerLabels() {
     lbl.style.top=clampedY+"px";
     lbl.textContent=g+"dB";
     levelRulerEl.appendChild(lbl);
-  }
+  });
 }
 
 function updateLevel(db) {
@@ -1799,18 +1806,24 @@ function drawLevelHistoryColumn(db) {
   // Faint reference gridlines every 20dB, matching the left-side ruler
   levelHistCtx.strokeStyle="rgba(255,255,255,0.08)";
   levelHistCtx.lineWidth=dpr;
-  for (let g=LEVEL_SCALE_MIN; g<=LEVEL_SCALE_MAX; g+=LEVEL_SCALE_STEP) {
+  levelGridValues().forEach(g => {
     const y = levelToY(g, H);
     levelHistCtx.beginPath(); levelHistCtx.moveTo(colX,y); levelHistCtx.lineTo(colX+colW,y); levelHistCtx.stroke();
-  }
+  });
   const levelVal = Math.min(LEVEL_SCALE_MAX, dbToLevelScale(isFinite(db)?db:-96));
-  const barTopY = levelToY(levelVal, H);
-  const barH = H - barTopY;
+  const barTopY = Math.min(H, levelToY(levelVal, H));
+  const barH = Math.max(0, H - barTopY);
   levelHistCtx.fillStyle = levelToColor(db);
   levelHistCtx.fillRect(colX, barTopY, colW, barH);
 }
 function updateLevelStats(db) {
   if (!isFinite(db)) return;
+  // Floor extreme near-total-silence readings (e.g. right at mic
+  // startup, before any real ambient sound has registered) at -96dB —
+  // without this, an occasional far-below-floor reading pinned MIN at
+  // the display floor (0.0dB) instead of reflecting an actual quiet
+  // moment.
+  db = Math.max(-96, db);
   levelSum += db; levelCount++;
   // Displayed as distance above the -96dB noise floor (0 = silence,
   // 96 = full scale), rather than the raw dB value's absolute value —
