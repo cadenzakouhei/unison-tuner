@@ -1118,6 +1118,22 @@ function refineHarmonicFreq(data, sr, theoreticalFreq, h) {
 // expressed directly in Hz so it stays meaningful regardless of the
 // selected sample rate.
 const MIN_DIFF_SEP_HZ = 20;
+// Rejects wild outliers relative to the recent median before adding a
+// new beat-rate sample, so a single spurious noise-driven detection
+// (reading many times faster than everything around it) can't skew
+// the rolling average the way one bad frame otherwise could.
+function pushBeatSample(h, val) {
+  const hist = beatHistory[h];
+  if (hist.length >= 8) {
+    const sorted = [...hist].sort((a,b)=>a-b);
+    const median = Math.abs(sorted[Math.floor(sorted.length/2)]);
+    const v = Math.abs(val);
+    if (median > 0.05 && (v > median*3 + 1 || v < median/3 - 0.05)) return;
+  }
+  hist.push(val);
+  if (hist.length>BEAT_SMOOTH) hist.shift();
+}
+
 function detectBeat(data, sr, hFreq) {
   if (!hFreq) return null;
   const binSize=sr/FFT_SIZE;
@@ -1367,8 +1383,7 @@ function renderLoop() {
     if (result && result.type==="diff") {
       // Two distinct peaks → direct frequency-difference beat rate
       beatNullCount[h]=0;
-      beatHistory[h].push(result.signedBeat !== undefined ? result.signedBeat : result.beat);
-      if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+      pushBeatSample(h, result.signedBeat !== undefined ? result.signedBeat : result.beat);
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
       // Reset envelope tracking since we're in diff mode now
       ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null;
@@ -1396,16 +1411,14 @@ function renderLoop() {
           if (periodMs > 0) {
             const rate = 1000/periodMs;
             lastBeatRate[h] = rate;
-            beatHistory[h].push(rate);
-            if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+            pushBeatSample(h, rate);
             statusVals[h]=rate<1.5?2:rate<5?1:0;
           }
         }
         lastPeakTime[h] = peakT;
       } else if (lastBeatRate[h] !== null) {
         // No new peak yet this frame — keep showing the last measured rate
-        beatHistory[h].push(lastBeatRate[h]);
-        if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+        pushBeatSample(h, lastBeatRate[h]);
       } else if (lastPeakTime[h] === null && noteStartTime[h] !== null) {
         // No peak found yet at all since the note started (still waiting
         // for the very first beat to complete). Per spec: estimate using
@@ -1415,8 +1428,7 @@ function renderLoop() {
         if (elapsedMs > 30) {
           const estPeriodMs = elapsedMs*2;
           const estRate = 1000/estPeriodMs;
-          beatHistory[h].push(estRate);
-          if (beatHistory[h].length>BEAT_SMOOTH) beatHistory[h].shift();
+          pushBeatSample(h, estRate);
         }
       }
     } else {
@@ -1735,14 +1747,17 @@ function updateNoteDisplay(freq) {
 // Math.abs(), where louder (closer to 0) actually gives a SMALLER
 // number.
 // LEVEL_CALIBRATION_DB roughly aligns the readout with a real SPL
-// meter: derived from a controlled comparison using a steady
-// white-noise source at fixed, matched distance from both phones
-// (more reliable than live piano playing, which varies in loudness
-// and mic distance between test sessions) — 91.3dB reference AVG vs
-// 105.4dB here at offset 39 → corrected to ≈25dB. This is also
-// device-dependent (iPhone mic sensitivity varies by model), so it's
-// an approximation for convenience, not a certified SPL measurement.
-const LEVEL_CALIBRATION_DB = 25;
+// meter: derived from controlled comparisons using a steady
+// white-noise source. Two attempts gave different results (91.3dB
+// ref vs 105.4dB here → offset 25; then 90.6dB ref vs 81.6dB here at
+// offset 25 → offset 34), likely reflecting real playback
+// volume/distance differences between test sessions rather than pure
+// calibration error — even a "controlled" comparison is only as
+// consistent as the physical setup each time. Using the latest
+// measurement. This is also device-dependent (iPhone mic sensitivity
+// varies by model), so it's an approximation for convenience, not a
+// certified SPL measurement.
+const LEVEL_CALIBRATION_DB = 34;
 function dbToLevelScale(db) {
   return Math.max(0, db + 96 + LEVEL_CALIBRATION_DB);
 }
