@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>サポート | Unison Analyzer</title>
+<style>
+  :root {
+    --bg: #14110f;
+    --panel: #1c1815;
+    --line: #342e28;
+    --ink: #ece6dd;
+    --ink-dim: #a89e91;
+    --brass: #c98a4b;
+    --brass-dim: #8a6136;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+    line-height: 1.75;
+  }
+  body {
+    background-image:
+      repeating-linear-gradient(90deg, rgba(201,138,75,0.035) 0px, rgba(201,138,75,0.035) 1px, transparent 1px, transparent 64px);
+  }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 72px 24px 96px;
+  }
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--brass);
+    text-transform: uppercase;
+    margin-bottom: 22px;
+  }
+  .eyebrow::before {
+    content: "";
+    display: inline-block;
+    width: 22px;
+    height: 1px;
+    background: var(--brass-dim);
+  }
+  h1 {
+    font-family: Georgia, "Hiragino Mincho ProN", serif;
+    font-weight: 400;
+    font-size: 40px;
+    line-height: 1.25;
+    margin: 0 0 14px;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+  }
+  .lede {
+    color: var(--ink-dim);
+    font-size: 16px;
+    margin: 0 0 56px;
+    max-width: 46ch;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 28px 28px 30px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-family: Georgia, "Hiragino Mincho ProN", serif;
+    font-weight: 400;
+    font-size: 19px;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+  .card p {
+    color: var(--ink-dim);
+    font-size: 15px;
+    margin: 0 0 18px;
+  }
+  .contact-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .contact-row .label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass-dim);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .contact-row a {
+    color: var(--ink);
+    font-size: 17px;
+    text-decoration: none;
+    border-bottom: 1px solid var(--brass-dim);
+    padding-bottom: 1px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .contact-row a:hover {
+    color: var(--brass);
+    border-color: var(--brass);
+  }
+  .meta {
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  details {
+    border-top: 1px solid var(--line);
+    padding: 18px 0;
+  }
+  details:first-of-type { border-top: none; padding-top: 4px; }
+  summary {
+    cursor: pointer;
+    font-size: 15.5px;
+    color: var(--ink);
+    list-style: none;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: "—";
+    color: var(--brass-dim);
+    flex-shrink: 0;
+  }
+  details[open] summary::before { color: var(--brass); }
+  details p {
+    margin: 12px 0 0 20px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+  }
+  footer {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-size: 12.5px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer a { color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Unison Analyzer — Support</div>
+  <h1>サポート</h1>
+  <p class="lede">ご質問・不具合のご報告・ご要望など、下記までお気軽にご連絡ください。通常2〜3営業日以内に返信いたします。</p>
+
+  <div class="card">
+    <h2>お問い合わせ</h2>
+    <p>アプリの動作に関するご質問、不具合の報告、機能のご要望はメールで承っています。</p>
+    <div class="contact-row">
+      <div>
+        <span class="label">Email</span>
+        <a href="mailto:cadenza.kouhei@gmail.com">cadenza.kouhei@gmail.com</a>
+      </div>
+      <span class="meta">通常2〜3営業日で返信</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>よくあるご質問</h2>
+
+    <details open>
+      <summary>マイクの音は録音・保存されますか?</summary>
+      <p>されません。マイクから取得した音声は端末内でリアルタイムに解析されるのみで、録音・保存・外部送信は一切行っていません。</p>
+    </details>
+
+    <details>
+      <summary>スペクトログラムが動きません</summary>
+      <p>画面右上の「MIC ON」ボタンがオンになっているか、また設定アプリで本アプリのマイクへのアクセスが許可されているかをご確認ください。</p>
+    </details>
+
+    <details>
+      <summary>対応しているiOSのバージョンは?</summary>
+      <p>最新のiOS上での動作を前提に開発しています。古いバージョンでの不具合が見られた場合はサポート先までご連絡ください。</p>
+    </details>
+
+  </div>
+
+  <footer>
+    <span>© 2026 Kouhei Matsumura</span>
+    <a href="../privacy-policy.html">プライバシーポリシー</a>
+  </footer>
+
+</div>
+</body>
+</html>
