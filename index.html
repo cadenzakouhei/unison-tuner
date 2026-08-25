@@ -368,6 +368,8 @@ let sustainMode  = false; // when off, duration tracking/display is fully hidden
 let selH         = new Array(NUM_H).fill(false);
 let beatHistory  = Array.from({length:NUM_H}, ()=>[]);
 let beatNullCount= new Array(NUM_H).fill(0);
+let beatRejectCount = new Array(NUM_H).fill(0); // consecutive pushBeatSample rejections (see escape hatch there)
+let lastBeatNoteName = null; // detected note name of the last analyzed frame — beat state resets when this changes
 let statusVals   = new Array(NUM_H).fill(0);
 let currentFreq  = null;
 // Actual (peak-snapped) harmonic frequencies, refreshed each frame.
@@ -426,6 +428,7 @@ function timelineStopDb()  { return timelineOnsetDb() - 1; }
 
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let analyserDisplay=null, fftDataDisplay=null;
+let analyserDisplayLow=null, fftDataDisplayLow=null; // fine-resolution analyser for the low register (see DISPLAY_FFT_SIZE_LOW)
 // Noise profile subtraction: captures a short average of the room's
 // steady background noise (in linear amplitude, per display-FFT bin),
 // then subtracts it from every subsequent frame before color-mapping.
@@ -457,6 +460,20 @@ function noiseApplyProfile(data) {
 }
 const DISPLAY_FFT_SIZE = 512; // reference app uses 256; 512 keeps slightly more resolution while still giving thick, sharp bands
 const DISPLAY_FFT_NOISE_FLOOR_OFFSET = 22; // dB compensation for the smaller FFT's higher noise floor (see drawSpectroColumn) — raised further to darken the background
+// Low-register rendering: with a single 512-point display FFT, one bin
+// spans sampleRate/512 (≈31Hz at 16kHz). Down at H1/H2 of a bass note
+// (~110/220Hz) that makes each harmonic band drawn ~31Hz thick — far
+// wider than the real peak — so the bottom of the LIN spectrogram
+// turned into unreadable fat slabs. A second, 4x finer display
+// analyser (2048-pt, ≈7.8Hz bins) is used for the low region only,
+// cross-faded into the coarse one above DISPLAY_XOVER; its 64→128ms
+// window still resolves the slow (≤4/s) beats typical of low
+// harmonics as visible pearls, while high harmonics keep the fast
+// 32ms texture of the 512-pt analyser.
+const DISPLAY_FFT_SIZE_LOW = 2048;
+const DISPLAY_FFT_LOW_NOISE_FLOOR_OFFSET = 16; // 2048-pt floor sits ~6dB below the 512-pt floor (2 halvings × 3dB), so compensate 6dB less
+const DISPLAY_XOVER_LO_HZ = 500;  // below this: fine analyser only
+const DISPLAY_XOVER_HI_HZ = 750;  // above this: coarse analyser only (blend between)
 let offCanvas=null, offCtx=null;
 let lastAxisUpdate = 0;
 let blackmanWin = null;
@@ -804,9 +821,14 @@ async function startMic() {
     analyserDisplay.fftSize = DISPLAY_FFT_SIZE;
     analyserDisplay.smoothingTimeConstant = 0.35;
     fftDataDisplay = new Float32Array(analyserDisplay.frequencyBinCount);
+    analyserDisplayLow = audioCtx.createAnalyser();
+    analyserDisplayLow.fftSize = DISPLAY_FFT_SIZE_LOW;
+    analyserDisplayLow.smoothingTimeConstant = 0.35;
+    fftDataDisplayLow = new Float32Array(analyserDisplayLow.frequencyBinCount);
     audioCtx.createMediaStreamSource(stream).connect(gainNode);
     gainNode.connect(analyser);
     gainNode.connect(analyserDisplay);
+    gainNode.connect(analyserDisplayLow);
     // Precompute Blackman window
     const N = analyser.fftSize;
     blackmanWin = new Float32Array(N);
@@ -1128,8 +1150,24 @@ function pushBeatSample(h, val) {
     const sorted = [...hist].sort((a,b)=>a-b);
     const median = Math.abs(sorted[Math.floor(sorted.length/2)]);
     const v = Math.abs(val);
-    if (median > 0.05 && (v > median*3 + 1 || v < median/3 - 0.05)) return;
+    if (median > 0.05 && (v > median*3 + 1 || v < median/3 - 0.05)) {
+      // Escape hatch (v1.0.1): if the history got seeded with wrong
+      // values (e.g. a burst of spurious diff-mode readings), the
+      // median itself is wrong and every CORRECT new sample gets
+      // rejected here forever — the displayed number froze and never
+      // tracked the real beat again. Many consecutive rejections all
+      // pointing away from the median means the median is the
+      // outlier, not the new data: flush and restart from the new
+      // value.
+      beatRejectCount[h]++;
+      if (beatRejectCount[h] >= 6) {
+        beatHistory[h] = [val];
+        beatRejectCount[h] = 0;
+      }
+      return;
+    }
   }
+  beatRejectCount[h] = 0;
   hist.push(val);
   if (hist.length>BEAT_SMOOTH) hist.shift();
 }
@@ -1142,10 +1180,13 @@ function detectBeat(data, sr, hFreq) {
   const wBins=Math.max(5,Math.round(winHz/binSize));
   const s=Math.max(1,cBin-wBins), e=Math.min(data.length-2,cBin+wBins);
   const peaks=[];
+  let winSum=0, winCnt=0;
   for (let i=s;i<=e;i++) {
+    winSum+=data[i]; winCnt++;
     if (data[i]>data[i-1]&&data[i]>data[i+1]&&data[i]>-95)
       peaks.push({f:i*binSize,v:data[i]});
   }
+  const winMean = winCnt>0 ? winSum/winCnt : -120;
   peaks.sort((a,b)=>b.v-a.v);
 
   if (peaks.length>=2) {
@@ -1167,7 +1208,16 @@ function detectBeat(data, sr, hFreq) {
     // easily satisfied by ordinary sidelobe texture from ONE real
     // peak, causing spurious high "beat" readings on notes that
     // weren't actually beating.
-    if (sepHz >= MIN_DIFF_SEP_HZ && lvlDiff <= 10) {
+    // Stricter evidence requirements (v1.0.1): lvlDiff was ≤10dB and
+    // there was no prominence check, which let a noise bump or a
+    // neighboring partial ~20-25Hz away from the real peak qualify as
+    // a "second string", producing constant bogus readings of +20〜28
+    // beat/s on notes that were audibly clean. Genuinely detuned twin
+    // strings produce two peaks of very similar strength that both
+    // stand well proud of the surrounding window; sidelobe/noise
+    // pairings fail one or both of these.
+    const prominenceOK = (top2[0].v - winMean) >= 4 && (top2[1].v - winMean) >= 4;
+    if (sepHz >= MIN_DIFF_SEP_HZ && lvlDiff <= 8 && prominenceOK) {
       // Determine direction: the peak above the theoretical reference
       // frequency (hFreq) is taken to be the string being tuned/moved.
       // If that peak sits above hFreq, the beat is reported as
@@ -1204,6 +1254,13 @@ function detectBeat(data, sr, hFreq) {
 // between the most recent local max and local min to exceed
 // MIN_BEAT_SWING_DB before counting it as a genuine beat peak.
 const MIN_BEAT_SWING_DB = 4; // dB — minimum envelope peak-to-trough swing to count as a real beat
+// Level gate for STARTING envelope tracking on a harmonic. This used
+// to reuse SUSTAIN_ONSET_DB (-40dB), which was designed for the
+// OVERALL input level — as a per-harmonic gate it was far too strict:
+// higher harmonics ring 15-25dB below the fundamental, so they often
+// never entered envelope tracking at all and their cards sat frozen
+// on whatever (frequently spurious) diff-mode value came earlier.
+const AMP_TRACK_MIN_DB = -55;
 function smoothedDb(env, idx, halfWin) {
   const s = Math.max(0, idx-halfWin), e = Math.min(env.length-1, idx+halfWin);
   let sum=0, cnt=0;
@@ -1263,6 +1320,7 @@ function renderLoop() {
   analyser.getFloatFrequencyData(fftData);
   analyser.getFloatTimeDomainData(timeData);
   if (analyserDisplay && fftDataDisplay) analyserDisplay.getFloatFrequencyData(fftDataDisplay);
+  if (analyserDisplayLow && fftDataDisplayLow) analyserDisplayLow.getFloatFrequencyData(fftDataDisplayLow);
   if (noiseCapturing && fftDataDisplay) {
     if (!noiseCaptureAccum) noiseCaptureAccum = new Float32Array(fftDataDisplay.length);
     for (let i=0; i<fftDataDisplay.length; i++) noiseCaptureAccum[i] += Math.pow(10, fftDataDisplay[i]/20);
@@ -1350,6 +1408,19 @@ function renderLoop() {
       sustainArmed = true; // previous strike has decayed below the threshold — ready for the next one
     }
   }
+  // A different NOTE means everything measured so far belongs to the
+  // previous note — carrying its beat history (and its median gate)
+  // into the new one both showed stale numbers and could block the
+  // new note's genuine readings from ever registering. Reset all
+  // per-harmonic beat state the moment the detected note changes.
+  const curNoteInfo = currentFreq ? freqToNote(currentFreq) : null;
+  if (curNoteInfo && curNoteInfo.name !== lastBeatNoteName) {
+    lastBeatNoteName = curNoteInfo.name;
+    for (let k=0;k<NUM_H;k++) {
+      beatHistory[k]=[]; beatRejectCount[k]=0; lastBeatRate[k]=null;
+      ampEnv[k]=[]; lastPeakTime[k]=null; noteStartTime[k]=null; lastTroughDb[k]=null;
+    }
+  }
   for (let h=0;h<NUM_H;h++) {
     const hfTheory=currentFreq?currentFreq*(h+1):null;
     const hf=hfTheory?refineHarmonicFreq(fftData,sr,hfTheory,h):null;
@@ -1387,7 +1458,7 @@ function renderLoop() {
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
       // Reset envelope tracking since we're in diff mode now
       ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null;
-    } else if (result && result.type==="amp" && selH[h] && result.db >= SUSTAIN_ONSET_DB) {
+    } else if (result && result.type==="amp" && selH[h] && result.db >= AMP_TRACK_MIN_DB) {
       // Single peak in frequency domain → this harmonic is "beating"
       // in amplitude over time. Track its envelope and measure the
       // time between successive envelope peaks directly.
@@ -1480,8 +1551,22 @@ function drawSpectroColumn() {
   const colW=Math.ceil(shift)+1, colX=W-colW;
   const img=offCtx.createImageData(colW,H);
   const d=img.data;
-  const binSizeDisplay = (audioCtx?.sampleRate||44100) / DISPLAY_FFT_SIZE;
+  const srNow = audioCtx?.sampleRate||44100;
+  const binSizeDisplay = srNow / DISPLAY_FFT_SIZE;
+  const binSizeLow = srNow / DISPLAY_FFT_SIZE_LOW;
   const dispData = noiseApplyProfile(fftDataDisplay);
+  // Low-analyser noise subtraction: the captured profile lives on the
+  // 512-pt grid, so look it up by FREQUENCY (interpolated) rather than
+  // by bin index — the profile is a smooth function of frequency, so
+  // this stays valid for the finer grid too.
+  const noiseLinAt = (freq) => {
+    if (!noiseFilterOn || !noiseProfile) return 0;
+    const fb = freq/binSizeDisplay;
+    const b0 = Math.floor(fb), fr = fb-b0;
+    const p = (b)=>(b>=0&&b<noiseProfile.length)?noiseProfile[b]:0;
+    return p(b0)+(p(b0+1)-p(b0))*fr;
+  };
+  const hasLow = !!fftDataDisplayLow;
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const fbin=freq/binSizeDisplay;
@@ -1495,7 +1580,26 @@ function drawSpectroColumn() {
     // about the actual room/signal changed. Without compensating,
     // color-mapping this the same way as before washed the whole
     // background out in bright yellow/orange instead of staying dark.
-    const db = dbRaw - DISPLAY_FFT_NOISE_FLOOR_OFFSET;
+    const dbHigh = dbRaw - DISPLAY_FFT_NOISE_FLOOR_OFFSET;
+    let db = dbHigh;
+    if (hasLow && freq < DISPLAY_XOVER_HI_HZ) {
+      // Fine-resolution sample for the low register
+      const fbL = freq/binSizeLow;
+      const bL0 = Math.floor(fbL), frL = fbL-bL0;
+      const sL=(b)=>(b>=0&&b<fftDataDisplayLow.length)?fftDataDisplayLow[b]:-120;
+      let dbLraw = sL(bL0)+(sL(bL0+1)-sL(bL0))*frL;
+      if (noiseFilterOn && noiseProfile) {
+        const lin = Math.pow(10, dbLraw/20);
+        dbLraw = 20*Math.log10(Math.max(1e-9, lin - noiseLinAt(freq)));
+      }
+      const dbLow = dbLraw - DISPLAY_FFT_LOW_NOISE_FLOOR_OFFSET;
+      if (freq <= DISPLAY_XOVER_LO_HZ) {
+        db = dbLow;
+      } else {
+        const w = (freq - DISPLAY_XOVER_LO_HZ) / (DISPLAY_XOVER_HI_HZ - DISPLAY_XOVER_LO_HZ);
+        db = dbLow*(1-w) + dbHigh*w;
+      }
+    }
     const [r,g,b]=dbToRGB(db);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
@@ -1906,6 +2010,7 @@ function resetLevelHistory() {
 function resetState() {
   currentFreq=null; pendingFreq=null; pendingCount=0; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
+  beatRejectCount=new Array(NUM_H).fill(0); lastBeatNoteName=null;
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
   resetSustainTimers();
