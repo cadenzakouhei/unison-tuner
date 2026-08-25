@@ -417,6 +417,20 @@ const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief d
 
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
+// The attack transient right after a note starts produces a sharp
+// rise-then-settle in the amplitude envelope that reads as a fake
+// "beat peak" — on a perfectly steady tone (e.g. a lone 440Hz sine)
+// that single fake peak pair yielded a bogus rate like +1.6 which
+// then stuck on screen forever. Ignore envelope peaks during the
+// attack window entirely.
+const ATTACK_IGNORE_MS = 400;
+// If no NEW envelope peak arrives for well over the last measured
+// beat period, the beating has genuinely stopped (or never really
+// existed) — decay the display toward 0.00 instead of holding the
+// stale rate. Real beating keeps producing periodic peaks, so this
+// never triggers on a genuinely beating unison.
+const BEAT_STALE_FACTOR = 2.5;   // × last beat period
+const BEAT_STALE_MIN_MS = 1200;  // floor, so slow display decay doesn't kick in absurdly fast for fast beats
 // Timeline view reuses the existing GAIN slider (spectroGain) for its
 // sensitivity, rather than a dedicated control — raising GAIN also
 // lowers the effective level needed for a harmonic to register as
@@ -1475,7 +1489,10 @@ function renderLoop() {
       const trough = detectEnvelopeTrough(ampEnv[h]);
       if (trough !== null) lastTroughDb[h] = trough;
 
-      const peakT = detectEnvelopePeak(ampEnv[h], lastPeakTime[h], lastTroughDb[h]);
+      // Skip peak confirmation during the attack window (see ATTACK_IGNORE_MS)
+      const peakT = (now - noteStartTime[h] > ATTACK_IGNORE_MS)
+        ? detectEnvelopePeak(ampEnv[h], lastPeakTime[h], lastTroughDb[h])
+        : null;
       if (peakT !== null) {
         if (lastPeakTime[h] !== null) {
           const periodMs = peakT - lastPeakTime[h];
@@ -1488,8 +1505,19 @@ function renderLoop() {
         }
         lastPeakTime[h] = peakT;
       } else if (lastBeatRate[h] !== null) {
-        // No new peak yet this frame — keep showing the last measured rate
-        pushBeatSample(h, lastBeatRate[h]);
+        // No new peak this frame. If it's been far longer than the
+        // last beat period since ANY peak, the beating has stopped —
+        // feed zeros so the display decays to 0.00 (the outlier
+        // gate's escape hatch flushes the old history within a few
+        // frames). Otherwise keep showing the last measured rate.
+        const periodMs = 1000/Math.max(0.1, Math.abs(lastBeatRate[h]));
+        const staleMs = lastPeakTime[h]!==null ? (now - lastPeakTime[h]) : Infinity;
+        if (staleMs > Math.max(BEAT_STALE_MIN_MS, periodMs*BEAT_STALE_FACTOR)) {
+          pushBeatSample(h, 0);
+          statusVals[h]=2;
+        } else {
+          pushBeatSample(h, lastBeatRate[h]);
+        }
       } else if (lastPeakTime[h] === null && noteStartTime[h] !== null) {
         // No peak found yet at all since the note started (still waiting
         // for the very first beat to complete). Per spec: estimate using
