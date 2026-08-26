@@ -417,20 +417,6 @@ const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief d
 
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
-// The attack transient right after a note starts produces a sharp
-// rise-then-settle in the amplitude envelope that reads as a fake
-// "beat peak" — on a perfectly steady tone (e.g. a lone 440Hz sine)
-// that single fake peak pair yielded a bogus rate like +1.6 which
-// then stuck on screen forever. Ignore envelope peaks during the
-// attack window entirely.
-const ATTACK_IGNORE_MS = 400;
-// If no NEW envelope peak arrives for well over the last measured
-// beat period, the beating has genuinely stopped (or never really
-// existed) — decay the display toward 0.00 instead of holding the
-// stale rate. Real beating keeps producing periodic peaks, so this
-// never triggers on a genuinely beating unison.
-const BEAT_STALE_FACTOR = 2.5;   // × last beat period
-const BEAT_STALE_MIN_MS = 1200;  // floor, so slow display decay doesn't kick in absurdly fast for fast beats
 // Timeline view reuses the existing GAIN slider (spectroGain) for its
 // sensitivity, rather than a dedicated control — raising GAIN also
 // lowers the effective level needed for a harmonic to register as
@@ -1084,21 +1070,65 @@ function detectPitch(data, sr, timeSamples) {
   // below (very common on real pianos) could give the k=2 candidate
   // just enough coherent, in-range energy to pass the checks below,
   // incorrectly pulling notes like A5 and above down an octave.
-  if (!usedMissingFundamentalFallback && maxBin*binSize < 300) {
+  // --- オクターブ/倍音ロック補正 ---
+  // 低音では基音binのエネルギーが弱く、強い倍音位置がHPSで
+  // 誤って「基音」と判定されることがある(例: C2弾いてG3=3倍音と
+  // 誤検出、あるいはA1弾いてA2=2倍音と誤検出)。ピアノ低音は基音より
+  // 2倍音の方が強いことが多く、HPS積でも2倍音位置が勝ちやすい。
+  // ただし判定が緩すぎると逆に、ノイズフロアの揺らぎを
+  // 「基音候補」と誤認して不必要に低い方へシフトしてしまう
+  // (例: 68Hzの音を34Hzに誤補正)。そのため:
+  //  - 候補は k=2 (最も可能性が高い半分の位置) から先に試す
+  //  - 候補binが実在するスペクトルピークであることを要求
+  //    (ノイズフロアの一点ではなく、両隣より高い山であること)
+  //  - maxBin 自体の強さを基準に、十分近い強度を持つ場合のみ
+  //    「独立した基音」とみなす
+  //  - 最低4本の倍音が観測できる場合のみ判定（統計的信頼性の確保）
+  //  - 一致率のしきい値 0.75
+  // Skipped entirely when the missing-fundamental fallback above was
+  // used: that path already found the true fundamental via a
+  // purpose-built method, and this correction step assumes a
+  // normally (product-)detected maxBin, which doesn't apply here.
+  // Raised the ceiling from 300Hz to 500Hz so that A2(110Hz)-vs-A1
+  // and similar bass octave errors — whose mistaken (doubled)
+  // candidate can land as high as ~220-260Hz — are still inside the
+  // corrective range. High notes (A5+) are unaffected because the
+  // candidate sub-bin must itself be a real, coherent peak with a
+  // full harmonic series, which sympathetic resonance an octave below
+  // a high note does not reliably produce.
+  if (!usedMissingFundamentalFallback && maxBin*binSize < 500) {
     const maxBinDb = data[maxBin];
     let correctedBin = maxBin;
     for (let k=2; k<=6; k++) {
       const subBin = Math.round(maxBin/k);
       if (subBin < lo) continue;
       // 候補の基音binが、検出された最強ピークと比べて明らかに弱い場合は
-      // 対象外（ノイズやサイドローブの可能性が高い）。
-      if (data[subBin] < maxBinDb - 20) continue;
+      // 対象外（ノイズやサイドローブの可能性が高い）。基音は2倍音より
+      // 弱いことが多いので、-24dBまで許容する（従来-20dBでは
+      // A1の弱い基音を取りこぼしていた）。
+      if (data[subBin] < maxBinDb - 24) continue;
+      // 候補binが実在のスペクトルピーク(局所最大)であることを要求。
+      // これによりノイズフロアの一点を基音と誤認するのを防ぐ。
+      const isPeak = subBin>=1 && subBin<data.length-1 &&
+                     data[subBin] >= data[subBin-1] && data[subBin] >= data[subBin+1];
+      if (!isPeak) continue;
       let coherent=0, total=0;
       for (let m=1; m*subBin<=hi && m<=8; m++) {
         total++;
         if (data[Math.min(m*subBin,data.length-1)] > -78) coherent++;
       }
-      if (total>=4 && coherent/total >= 0.85) { correctedBin = subBin; break; }
+      if (total>=4 && coherent/total >= 0.75) {
+        // 中音域(基音候補が220Hz以上=A3以上)では、基音は通常それ自身が
+        // 最強partialなので、真に1オクターブ下なら「下の候補」も
+        // 相応に強いはず。maxBinが下候補より大幅に強い(=maxBinが真の
+        // 基音)場合は補正しない。これによりA4(440)をA3(220)に、
+        // C5をC4に、といった中音域の過補正を防ぐ。低音(A2以下,
+        // 110Hz付近)では基音<2倍音が普通なので、この非対称チェックは
+        // subBinが110Hz以上のときのみ適用する。
+        const subFreq = subBin*binSize;
+        if (subFreq >= 200 && data[maxBin] > data[subBin] + 6) continue;
+        correctedBin = subBin; break;
+      }
     }
     maxBin = correctedBin;
   }
@@ -1489,10 +1519,7 @@ function renderLoop() {
       const trough = detectEnvelopeTrough(ampEnv[h]);
       if (trough !== null) lastTroughDb[h] = trough;
 
-      // Skip peak confirmation during the attack window (see ATTACK_IGNORE_MS)
-      const peakT = (now - noteStartTime[h] > ATTACK_IGNORE_MS)
-        ? detectEnvelopePeak(ampEnv[h], lastPeakTime[h], lastTroughDb[h])
-        : null;
+      const peakT = detectEnvelopePeak(ampEnv[h], lastPeakTime[h], lastTroughDb[h]);
       if (peakT !== null) {
         if (lastPeakTime[h] !== null) {
           const periodMs = peakT - lastPeakTime[h];
@@ -1505,19 +1532,8 @@ function renderLoop() {
         }
         lastPeakTime[h] = peakT;
       } else if (lastBeatRate[h] !== null) {
-        // No new peak this frame. If it's been far longer than the
-        // last beat period since ANY peak, the beating has stopped —
-        // feed zeros so the display decays to 0.00 (the outlier
-        // gate's escape hatch flushes the old history within a few
-        // frames). Otherwise keep showing the last measured rate.
-        const periodMs = 1000/Math.max(0.1, Math.abs(lastBeatRate[h]));
-        const staleMs = lastPeakTime[h]!==null ? (now - lastPeakTime[h]) : Infinity;
-        if (staleMs > Math.max(BEAT_STALE_MIN_MS, periodMs*BEAT_STALE_FACTOR)) {
-          pushBeatSample(h, 0);
-          statusVals[h]=2;
-        } else {
-          pushBeatSample(h, lastBeatRate[h]);
-        }
+        // No new peak yet this frame — keep showing the last measured rate
+        pushBeatSample(h, lastBeatRate[h]);
       } else if (lastPeakTime[h] === null && noteStartTime[h] !== null) {
         // No peak found yet at all since the note started (still waiting
         // for the very first beat to complete). Per spec: estimate using
@@ -1616,6 +1632,23 @@ function drawSpectroColumn() {
       const bL0 = Math.floor(fbL), frL = fbL-bL0;
       const sL=(b)=>(b>=0&&b<fftDataDisplayLow.length)?fftDataDisplayLow[b]:-120;
       let dbLraw = sL(bL0)+(sL(bL0+1)-sL(bL0))*frL;
+      // Thicken the low-register bands. The 2048-pt analyser resolves
+      // bass partials so finely that H1/H2 rendered as hair-thin lines
+      // only 1-2px tall, which the user found hard to read. Widen the
+      // drawn band by taking the loudest of a few neighbouring fine
+      // bins: a real partial then paints across the several display
+      // rows its skirt spans, giving the same comfortable thickness as
+      // the high register, WITHOUT coarsening the frequency data used
+      // for pitch/beat detection (that path is entirely separate). The
+      // widen radius shrinks toward the crossover so there's no visible
+      // seam where the fine region meets the coarse region.
+      const widenFrac = 1 - Math.min(1, freq/DISPLAY_XOVER_HI_HZ);
+      const widenBins = Math.round(2*widenFrac); // up to ±2 fine bins at the very bottom
+      for (let wb=-widenBins; wb<=widenBins; wb++) {
+        if (wb===0) continue;
+        const v = sL(bL0+wb);
+        if (v > dbLraw) dbLraw = v;
+      }
       if (noiseFilterOn && noiseProfile) {
         const lin = Math.pow(10, dbLraw/20);
         dbLraw = 20*Math.log10(Math.max(1e-9, lin - noiseLinAt(freq)));
