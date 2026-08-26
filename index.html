@@ -1002,19 +1002,44 @@ function detectPitch(data, sr, timeSamples) {
   // only accepted if at least 5 of its first 8 harmonics show real
   // energy, so it can't latch onto noise.
   let usedMissingFundamentalFallback = false;
-  if (maxBin===0 || data[maxBin]<-72) {
-    const shsLo = Math.max(1, Math.floor(20/binSize));
+  // Trigger the missing-fundamental search not only when the normal
+  // search found almost nothing (maxBin===0 / very weak), but ALSO
+  // when the winner sits in the lowest octave (≤85Hz, roughly A1 and
+  // below). On the very lowest piano notes the 2nd harmonic is
+  // routinely stronger than the fundamental, so the product search
+  // happily settles on that 2nd harmonic (e.g. 55Hz for A0) and never
+  // reaches the true ~27.5Hz fundamental — yet it's not "weak" enough
+  // to trip the old data[maxBin]<-72 gate. Checking the low-octave
+  // case lets A0 be recovered when its harmonic stack genuinely lines
+  // up an octave below the current winner.
+  if (maxBin===0 || data[maxBin]<-72 || maxBin*binSize<=85) {
+    const shsLo = Math.max(1, Math.floor(16/binSize)); // 16Hz: just below A0's 27.5Hz, with margin for mic roll-off
     const shsHi = Math.floor(85/binSize);
     let shsBest=-1, shsBestSum=0;
     for (let i=shsLo; i<=shsHi; i++) {
+      const candFreq = i*binSize;
       let sum=0, coherent=0;
       for (let m=1; m<=8; m++) {
         const bin = Math.min(i*m, data.length-1);
         if (data[bin] > -80) { sum += lin[bin]; coherent++; }
       }
-      if (coherent>=5 && sum>shsBestSum) { shsBestSum=sum; shsBest=i; }
+      // Normally require 5 of 8 harmonics present. But the very
+      // lowest octave (below ~40Hz, i.e. around A0/A#0/B0) has so
+      // little energy at the fundamental and a mic-dependent low-end
+      // roll-off, so accept 4 coherent harmonics there. Kept at ≥4
+      // (not lower) so it still can't lock onto random noise.
+      const need = candFreq < 40 ? 4 : 5;
+      if (coherent>=need && sum>shsBestSum) { shsBestSum=sum; shsBest=i; }
     }
-    if (shsBest>0) { maxBin = shsBest; usedMissingFundamentalFallback = true; }
+    // Only accept the low-octave-triggered result if it actually moved
+    // DOWN to a real, lower fundamental (a coherent stack an octave or
+    // more below the current winner). If shsBest lands on essentially
+    // the same bin we already had, keep the original — this prevents
+    // the newly-added low-octave trigger from disturbing notes like A1
+    // that are already detected correctly.
+    if (shsBest>0 && (maxBin===0 || data[maxBin]<-72 || shsBest < maxBin*0.75)) {
+      maxBin = shsBest; usedMissingFundamentalFallback = true;
+    }
   }
   if (maxBin===0 || (data[maxBin]<-72 && !usedMissingFundamentalFallback)) return null;
 
