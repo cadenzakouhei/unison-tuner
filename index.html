@@ -134,7 +134,6 @@ background: #555; transform: translateY(-50%);
 flex: 1; position: relative; overflow: hidden; touch-action: none;
 }
 #spectro-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-#timeline-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 #freq-axis { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 .freq-label {
 position: absolute; left: 4px; font-size: 11px; font-weight: 600;
@@ -248,13 +247,13 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <div id="tags-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="tags-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
     </div>
+    <span id="inh-label" style="font-size:10px;color:#ccc;">INH</span>
+    <div id="inh-toggle" style="width:36px;height:20px;border-radius:10px;background:#333;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+      <div id="inh-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
+    </div>
     <span id="scale-label" style="font-size:10px;color:#ccc;">LIN</span>
     <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
-    </div>
-    <span id="view-label" style="font-size:10px;color:#ccc;">SPEC</span>
-    <div id="view-toggle" class="toggle-switch">
-      <div id="view-knob" class="toggle-knob"></div>
     </div>
     <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">16000 Hz</button>
   </div>
@@ -269,7 +268,6 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <div id="freq-ruler"></div>
     <div id="spectro-canvas-wrap">
       <canvas id="spectro-canvas"></canvas>
-      <canvas id="timeline-canvas" style="display:none;"></canvas>
       <div id="freq-axis"></div>
     </div>
     <div id="db-scale">
@@ -362,7 +360,7 @@ let spectroGain  = 70;  // default gain
 let refPitch     = REF_PITCH_DEFAULT;
 let logScale     = false; // default linear like reference app
 let showTags     = true;  // whether H1–H8 harmonic frequency tags are drawn on the spectrogram
-let viewMode     = 'spec'; // 'spec' (heatmap) or 'timeline' (per-harmonic sounding bars)
+let showInh      = false; // whether each tag (H2–H8) also shows its inharmonicity vs H1, in cents and %
 let sustainMode  = false; // when off, duration tracking/display is fully hidden; when on, duration
                            // starts automatically on note onset and is frozen only by the manual Stop button
 let selH         = new Array(NUM_H).fill(false);
@@ -411,8 +409,6 @@ const SUSTAIN_ONSET_DB = -40; // overall input level that starts the count
 // Tracks, per harmonic, whether it's currently "sounding" (continuous bar)
 // and whether it's currently in a beat/warble trough (drawn as a pinch/notch
 // in the bar rather than a break, since the note hasn't actually died out).
-let timelineOn           = new Array(NUM_H).fill(false);
-let timelineDbHeld       = new Array(NUM_H).fill(-96); // slow-release smoothed level, drives both on/off and bar thickness
 const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief detection dropouts without a real gap
 
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
@@ -571,8 +567,6 @@ for (let h = 0; h < NUM_H; h++) {
 // ── Canvas init ────────────────────────────────────────────
 const spectroCanvas = document.getElementById("spectro-canvas");
 const spectroCtx    = spectroCanvas.getContext("2d");
-const timelineCanvas = document.getElementById("timeline-canvas");
-const timelineCtx    = timelineCanvas.getContext("2d");
 const freqAxisEl    = document.getElementById("freq-axis");
 
 function initCanvas() {
@@ -606,23 +600,11 @@ function initLevelHistCanvas() {
   levelHistCtx.fillRect(0, 0, levelHistCanvas.width, levelHistCanvas.height);
   updateLevelRulerLabels();
 }
-function initTimelineCanvas() {
-  const dpr  = window.devicePixelRatio || 1;
-  const wrap = timelineCanvas.parentElement;
-  const w    = wrap.offsetWidth  || 320;
-  const h    = wrap.offsetHeight || 300;
-  timelineCanvas.width  = w * dpr;
-  timelineCanvas.height = h * dpr;
-  timelineCanvas.style.width  = w + "px";
-  timelineCanvas.style.height = h + "px";
-  timelineCtx.fillStyle = "#000";
-  timelineCtx.fillRect(0, 0, timelineCanvas.width, timelineCanvas.height);
-}
 // Explicitly (re)assert the default view range before the very first
 // canvas init, in case anything touched viewLo/viewHi before this point.
 viewLo = logScale ? 10 : 0;
 viewHi = 4000;
-requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }));
+requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHistCanvas(); }));
 // Safety re-init: on a cold app launch, the WKWebView's layout
 // (safe-area insets, dynamic viewport units) can occasionally still
 // be settling slightly after the double-rAF above already ran,
@@ -630,9 +612,9 @@ requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initLevelHis
 // delayed re-measurements catch that without any visible effect if
 // the layout was already correct (re-running this is cheap and
 // idempotent).
-setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 300);
-setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }, 1000);
-function reinitAllCanvases() { initCanvas(); initLevelHistCanvas(); initTimelineCanvas(); }
+setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); }, 300);
+setTimeout(()=>{ initCanvas(); initLevelHistCanvas(); }, 1000);
+function reinitAllCanvases() { initCanvas(); initLevelHistCanvas(); }
 window.addEventListener("resize", ()=>{
   reinitAllCanvases();
   // WKWebView can fire resize before the layout (safe-area insets,
@@ -882,7 +864,6 @@ function resetSpectrogramView() {
   // it at the source instead of working around symptoms.
   if (typeof initCanvas === "function") initCanvas();
   if (typeof initLevelHistCanvas === "function") initLevelHistCanvas();
-  if (typeof initTimelineCanvas === "function") initTimelineCanvas();
   lastAxisUpdate = 0;
 }
 // iOS commonly resumes a suspended WKWebView instance instead of
@@ -1002,17 +983,21 @@ function detectPitch(data, sr, timeSamples) {
   // only accepted if at least 5 of its first 8 harmonics show real
   // energy, so it can't latch onto noise.
   let usedMissingFundamentalFallback = false;
-  // Trigger the missing-fundamental search not only when the normal
-  // search found almost nothing (maxBin===0 / very weak), but ALSO
-  // when the winner sits in the lowest octave (≤85Hz, roughly A1 and
-  // below). On the very lowest piano notes the 2nd harmonic is
-  // routinely stronger than the fundamental, so the product search
-  // happily settles on that 2nd harmonic (e.g. 55Hz for A0) and never
-  // reaches the true ~27.5Hz fundamental — yet it's not "weak" enough
-  // to trip the old data[maxBin]<-72 gate. Checking the low-octave
-  // case lets A0 be recovered when its harmonic stack genuinely lines
-  // up an octave below the current winner.
-  if (maxBin===0 || data[maxBin]<-72 || maxBin*binSize<=85) {
+  // Trigger the missing-fundamental search when the normal search
+  // found almost nothing (maxBin===0 / very weak), OR when the winner
+  // sits at A0's own octave (≤45Hz). The low-octave trigger is
+  // deliberately capped at 45Hz — NOT 85Hz. A first attempt used 85Hz
+  // so that a winner landing on A0's 2nd harmonic (~55Hz) would be
+  // pulled down, but that dragged the whole A1–C2 region (55–65Hz)
+  // into the octave-search too: on those notes the search flickered
+  // frame-to-frame between keeping the true fundamental and inventing
+  // one an octave lower, so currentFreq — and every H1–H8 tag riding
+  // on it — jittered. A0 itself is recovered by the maxBin===0 / weak
+  // gate (its fundamental is so faint the normal search rarely locks
+  // onto it cleanly), and the ≤45Hz case only ever fires when the
+  // winner is already down in A0 territory, so A1 and up are left
+  // completely alone.
+  if (maxBin===0 || data[maxBin]<-72 || maxBin*binSize<=45) {
     const shsLo = Math.max(1, Math.floor(16/binSize)); // 16Hz: just below A0's 27.5Hz, with margin for mic roll-off
     const shsHi = Math.floor(85/binSize);
     let shsBest=-1, shsBestSum=0;
@@ -1035,8 +1020,8 @@ function detectPitch(data, sr, timeSamples) {
     // DOWN to a real, lower fundamental (a coherent stack an octave or
     // more below the current winner). If shsBest lands on essentially
     // the same bin we already had, keep the original — this prevents
-    // the newly-added low-octave trigger from disturbing notes like A1
-    // that are already detected correctly.
+    // the newly-added low-octave trigger from disturbing notes that
+    // are already detected correctly.
     if (shsBest>0 && (maxBin===0 || data[maxBin]<-72 || shsBest < maxBin*0.75)) {
       maxBin = shsBest; usedMissingFundamentalFallback = true;
     }
@@ -1497,29 +1482,6 @@ function renderLoop() {
     const result=detectBeat(fftData,sr,hf);
     const curDb = result ? result.db : -Infinity;
 
-    // Timeline view tracking: independent of Sustain Mode and harmonic
-    // selection, always runs so the TIMELINE view is accurate the
-    // moment it's switched to. Reuses the same -40dB onset / -75dB
-    // silence thresholds as Sustain Mode, but fully automatic (no
-    // manual Stop needed) since this is a passive visualization.
-    // Rather than reacting to the raw per-frame level (which can dip
-    // to silence for a stray frame or two even while a note is
-    // clearly still ringing, chopping the bar into slivers), a
-    // slow-release "held" level is tracked instead: it jumps up
-    // instantly on any louder frame (attack), but only decays a small
-    // fixed amount per frame when the raw level is lower (release).
-    // This naturally bridges brief detection dropouts, and its
-    // continuous value also drives the bar's thickness below.
-    if (isFinite(curDb) && curDb > timelineDbHeld[h]) {
-      timelineDbHeld[h] = curDb;
-    } else {
-      timelineDbHeld[h] = Math.max(-96, timelineDbHeld[h] - TIMELINE_RELEASE_DB_PER_FRAME);
-    }
-    if (timelineDbHeld[h] >= timelineOnsetDb()) timelineOn[h] = true;
-    else if (timelineDbHeld[h] < timelineStopDb()) timelineOn[h] = false;
-    // else: held level sits between the thresholds — keep whatever
-    // on/off state it already had, avoiding flicker right at the edge.
-
     if (result && result.type==="diff") {
       // Two distinct peaks → direct frequency-difference beat rate
       beatNullCount[h]=0;
@@ -1595,11 +1557,7 @@ function renderLoop() {
   // able to show a different reading up top than what the tag below
   // it (which snaps to the real peak) displayed.
   updateNoteDisplay(harmonicFreqRefined[0]!==null && harmonicFreqRefined[0]!==undefined ? harmonicFreqRefined[0] : currentFreq);
-  if (viewMode === 'spec') {
-    drawSpectroColumn();
-  } else {
-    drawTimelineColumn();
-  }
+  drawSpectroColumn();
   updateBeatDisplay();
   updateSustainCounter();
   updateFreqAxisLabels();
@@ -1706,45 +1664,6 @@ function drawSpectroColumn() {
   spectroCtx.drawImage(offCanvas,0,0);
 }
 
-// ── Timeline view: continuous per-harmonic sounding bars ───────────
-// H8 lane at the top, H1 at the bottom (matches the spectrogram's
-// high-freq-at-top convention). All 8 lanes are always evenly spaced
-// (H/8 each), independent of the note's actual pitch — the lane order
-// is simply harmonic number 1–8, not frequency. Each bar stays solid
-// while the harmonic is continuously sounding (timelineOn); its
-// thickness continuously tracks the smoothed level (timelineDbHeld),
-// so a beat/warble shows up as an organic thinning-and-thickening of
-// the bar rather than an on/off flicker or a hard break.
-const TIMELINE_THICK_LO_DB = -60; // level at/below which the bar is drawn at its thinnest
-const TIMELINE_THICK_HI_DB = -8;  // level at/above which the bar is drawn at its thickest
-const TIMELINE_MIN_FRAC = 0.12;   // thinnest bar, as a fraction of the lane height
-const TIMELINE_MAX_FRAC = 0.92;   // thickest bar, as a fraction of the lane height
-function drawTimelineColumn() {
-  if (!timelineCanvas || !timelineCanvas.width) return;
-  const W=timelineCanvas.width, H=timelineCanvas.height;
-  const dpr=window.devicePixelRatio||1;
-  const shift=Math.max(1, Math.round(SCROLL_SPD*dpr)); // integer device px: fractional drawImage offsets would resample-blur the whole history every frame
-  timelineCtx.drawImage(timelineCanvas,-shift,0);
-  const colW=Math.ceil(shift)+1, colX=W-colW;
-  timelineCtx.fillStyle="#000";
-  timelineCtx.fillRect(colX,0,colW,H);
-  const laneH = H/NUM_H;
-  for (let h=0; h<NUM_H; h++) {
-    const rowFromTop = NUM_H-1-h; // H8 at row 0 (top) ... H1 at row NUM_H-1 (bottom)
-    const laneTop = rowFromTop*laneH;
-    timelineCtx.strokeStyle="rgba(255,255,255,0.06)";
-    timelineCtx.lineWidth=dpr;
-    timelineCtx.beginPath(); timelineCtx.moveTo(colX,laneTop); timelineCtx.lineTo(colX+colW,laneTop); timelineCtx.stroke();
-    if (!timelineOn[h]) continue;
-    const t = Math.max(0, Math.min(1, (timelineDbHeld[h]-TIMELINE_THICK_LO_DB)/(TIMELINE_THICK_HI_DB-TIMELINE_THICK_LO_DB)));
-    const frac = TIMELINE_MIN_FRAC + t*(TIMELINE_MAX_FRAC-TIMELINE_MIN_FRAC);
-    const barH = laneH*frac;
-    const barTop = laneTop + (laneH-barH)/2;
-    timelineCtx.fillStyle = "rgba(0,220,120,0.92)";
-    timelineCtx.fillRect(colX, barTop, colW, Math.max(1,barH));
-  }
-}
-
 // ── Freq axis labels ───────────────────────────────────────
 const freqRulerEl = document.getElementById("freq-ruler");
 
@@ -1754,40 +1673,9 @@ function updateFreqAxisLabels() {
   lastAxisUpdate=now;
   freqAxisEl.innerHTML="";
   freqRulerEl.innerHTML="";
-  // Use whichever canvas is actually visible for the height reference —
-  // the hidden one reports clientHeight 0, which previously caused the
-  // timeline ruler labels to be positioned against a stale/wrong height
-  // (spectroCanvas's, even while it was display:none) and drift out of
-  // alignment with the lanes actually drawn on timelineCanvas.
-  const H=(viewMode==='timeline' ? timelineCanvas.clientHeight : spectroCanvas.clientHeight)||300;
+  const H=spectroCanvas.clientHeight||300;
   if (H<10) return;
   const LABEL_MARGIN = 9; // half label height, roughly — keeps labels from clipping at the edges
-
-  if (viewMode === 'timeline') {
-    // Timeline mode: the left ruler shows lane labels H8 (top) .. H1
-    // (bottom) instead of a frequency scale — 8 fixed, evenly spaced
-    // lanes by harmonic number, independent of the note's actual
-    // pitch. No edge-clamping here (unlike the frequency ruler): with
-    // a fixed lane grid every label sits exactly at its lane's center.
-    // Labels are left-aligned (instead of the frequency ruler's
-    // right-alignment) with the note name appended after the H-number,
-    // so each lane reads "H1 D3" etc.
-    const laneH = H/NUM_H;
-    for (let h=0; h<NUM_H; h++) {
-      const rowFromTop = NUM_H-1-h;
-      const y = rowFromTop*laneH + laneH/2;
-      const lbl=document.createElement("div");
-      lbl.className="ruler-label";
-      lbl.style.top=y+"px";
-      lbl.style.left="4px";
-      lbl.style.right="auto";
-      const hf = harmonicFreqRefined[h];
-      const note = hf ? freqToNote(hf) : null;
-      lbl.textContent = note ? ("H"+(h+1)+" "+note.name) : ("H"+(h+1));
-      freqRulerEl.appendChild(lbl);
-    }
-    return;
-  }
 
   // Left-side ruler: tick + number, independent column outside the graph.
   const grids=[0,20,50,100,200,500,1000,2000,3000,4000,5000,6000,7000,8000,9000,10000];
@@ -1809,6 +1697,13 @@ function updateFreqAxisLabels() {
 
   // In-graph harmonic labels, kept inside the spectrogram area.
   if (showTags && currentFreq) {
+    // For the inharmonicity readout, everything is measured against
+    // the ACTUAL H1 (harmonicFreqRefined[0]), not the theoretical
+    // pitch: a real string's H1 is the tuning reference, and its upper
+    // partials stretch sharp of exact integer multiples of it. For
+    // each Hn we compare the measured partial freq against n×(H1
+    // measured); the excess is reported both in cents and in percent.
+    const h1f = harmonicFreqRefined[0];
     for (let h=0;h<NUM_H;h++) {
       const hf=harmonicFreqRefined[h];
       if (!hf||hf<=viewLo||hf>=viewHi) continue;
@@ -1819,7 +1714,17 @@ function updateFreqAxisLabels() {
       lbl.style.top=Math.max(LABEL_MARGIN, Math.min(H-LABEL_MARGIN, y))+"px";
       lbl.style.color=selH[h]?"rgba(0,255,85,0.95)":"rgba(255,220,100,0.6)";
       const hfNote=freqToNote(hf);
-      lbl.textContent=hfNote ? `H${h+1} ${hfNote.name} ${hf.toFixed(0)}Hz` : `H${h+1} ${hf.toFixed(0)}Hz`;
+      let txt = hfNote ? `H${h+1} ${hfNote.name} ${hf.toFixed(0)}Hz` : `H${h+1} ${hf.toFixed(0)}Hz`;
+      // Inharmonicity readout (H2–H8 only; H1 is the reference = 0).
+      if (showInh && h>0 && h1f && h1f>0) {
+        const ideal = h1f * (h+1);         // exact-integer-multiple target
+        const cents = 1200 * Math.log2(hf/ideal);
+        const pct   = (hf/ideal - 1) * 100;
+        const cs = (cents>=0?"+":"") + cents.toFixed(1) + "c";
+        const ps = (pct>=0?"+":"")   + pct.toFixed(2)  + "%";
+        txt += ` ${cs} ${ps}`;
+      }
+      lbl.textContent = txt;
       freqAxisEl.appendChild(lbl);
     }
   }
@@ -2100,11 +2005,9 @@ function resetState() {
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
   resetSustainTimers();
-  timelineOn=new Array(NUM_H).fill(false); timelineDbHeld=new Array(NUM_H).fill(-96);
   harmonicFreqRefined=new Array(NUM_H).fill(null);
   viewLo=logScale?10:0; viewHi=4000;
   updateNoteDisplay(null); updateLevel(-Infinity); updateBeatDisplay(); updateSustainCounter();
-  if (timelineCtx && timelineCanvas.width) { timelineCtx.fillStyle="#000"; timelineCtx.fillRect(0,0,timelineCanvas.width,timelineCanvas.height); }
 }
 
 // ── Controls ───────────────────────────────────────────────
@@ -2207,13 +2110,19 @@ document.getElementById("fullscreen-btn").addEventListener("click", function() {
   // The spectrogram's available height just changed — re-measure and
   // rebuild the canvas backing buffers to match, same as toggling a
   // harmonic selection does.
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); initTimelineCanvas(); }));
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); }));
 });
 
 document.getElementById("tags-toggle").addEventListener("click", function() {
   showTags=!showTags;
   this.style.background=showTags?"#446622":"#333";
   document.getElementById("tags-knob").style.left=showTags?"18px":"2px";
+  lastAxisUpdate=0; updateFreqAxisLabels();
+});
+document.getElementById("inh-toggle").addEventListener("click", function() {
+  showInh=!showInh;
+  this.style.background=showInh?"#446622":"#333";
+  document.getElementById("inh-knob").style.left=showInh?"18px":"2px";
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
 document.getElementById("scale-toggle").addEventListener("click", function() {
@@ -2228,21 +2137,8 @@ document.getElementById("scale-toggle").addEventListener("click", function() {
   lastAxisUpdate=0; updateFreqAxisLabels();
 });
 
-// SPEC / TIMELINE view toggle: swaps which canvas is visible and which
-// kind of ruler labels are shown. The underlying tracking state for
-// the timeline (timelineOn / timelineDbHeld) is always kept up to date
-// in the render loop regardless of which view is showing, so switching
-// mid-session immediately reflects the current sounding state.
-document.getElementById("view-toggle").addEventListener("click", function() {
-  viewMode = viewMode==='spec' ? 'timeline' : 'spec';
-  document.getElementById("view-label").textContent = viewMode==='spec' ? "SPEC" : "TIMELINE";
-  this.style.background = viewMode==='timeline' ? "#2255aa" : "#446622";
-  document.getElementById("view-knob").style.left = viewMode==='timeline' ? "18px" : "2px";
-  spectroCanvas.style.display  = viewMode==='spec'     ? "block" : "none";
-  timelineCanvas.style.display = viewMode==='timeline' ? "block" : "none";
-  if (viewMode==='timeline') initTimelineCanvas();
-  lastAxisUpdate=0; updateFreqAxisLabels();
-});
+// The spectrogram is the only view. (A SPEC/TIMELINE toggle was
+// removed; drawSpectroColumn is always what runs.)
 
 // Sustain Mode: OFF by default — the counter is fully hidden. ON —
 // onset is auto-detected (SUSTAIN_ONSET_DB), but the elapsed time is
