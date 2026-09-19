@@ -310,6 +310,11 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
       <span class="ctrl-val" id="vl-gain">70 dB</span>
     </div>
     <div class="ctrl-row">
+      <span class="ctrl-label">RANGE</span>
+      <input type="range" id="sl-range" min="24" max="96" step="1" value="96">
+      <span class="ctrl-val" id="vl-range">96 dB</span>
+    </div>
+    <div class="ctrl-row">
       <span class="ctrl-label">A4 REF</span>
       <button id="btn-ref-down" class="ctrl-btn ctrl-btn-wide">−</button>
       <span class="ctrl-val" id="vl-ref">442.0 Hz</span>
@@ -356,7 +361,8 @@ let micOn        = false;
 const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050];
 let targetSampleRate = 16000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
-let spectroGain  = 70;  // default gain
+let spectroGain  = 70;  // dB — brightness: shifts the whole color mapping up/down (higher = brighter overall)
+let spectroRange = 96;  // dB — contrast: the dB span the color mapping is stretched across (lower = punchier/more contrasty, higher = smoother/flatter gradient)
 let refPitch     = REF_PITCH_DEFAULT;
 let logScale     = false; // default linear like reference app
 let showTags     = true;  // whether H1–H8 harmonic frequency tags are drawn on the spectrogram
@@ -489,7 +495,14 @@ let levelHeld=-96, levelStrikeOn=false; // slow-release held level, used only to
 // Reference: background=cyan(-60dB), signal=yellow-red(-40~0dB)
 function dbToRGB(db) {
   const boosted = db + spectroGain;
-  let t = Math.max(0, Math.min(1, (boosted + 96) / 96));
+  // spectroRange is the dB span the color ramp is stretched across —
+  // narrowing it (contrast up) makes the same dB difference swing
+  // through more of the color ramp (punchier/more contrasty); widening
+  // it (contrast down) spreads the same dB difference across less of
+  // the ramp (smoother/flatter gradient). Previously this span was
+  // hardcoded to 96 together with the GAIN offset, so there was no way
+  // to change contrast independently of brightness.
+  let t = Math.max(0, Math.min(1, (boosted + spectroRange) / spectroRange));
   // ガンマ補正: ノイズフロア付近(低t)を暗い青/黒側へさらに圧縮し、
   // 真のピーク(高t)はほぼそのまま保つ。これにより参考アプリのような
   // 「無地で暗い背景＋くっきり濃い帯」のコントラストになる。
@@ -2051,6 +2064,10 @@ function resetState() {
 document.getElementById("sl-gain").addEventListener("input", function() {
   spectroGain=parseInt(this.value);
   document.getElementById("vl-gain").textContent=spectroGain+" dB";
+});
+document.getElementById("sl-range").addEventListener("input", function() {
+  spectroRange=parseInt(this.value);
+  document.getElementById("vl-range").textContent=spectroRange+" dB";
 });
 
 // Sample rate: AudioContext sample rate is fixed at creation, so
