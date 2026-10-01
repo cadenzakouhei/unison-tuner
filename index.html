@@ -64,6 +64,19 @@ body.fullscreen-spectro .section-label {
 }
 body.fullscreen-spectro #spectro-section { flex: 1; }
 
+/* Fullscreen Sound Level mode: swipe up on the Sound Level graph to
+   hide everything else and let it fill the screen, same pattern as
+   fullscreen-spectro above. Swipe down (or the same gesture again) to
+   leave it. */
+body.fullscreen-level #header,
+body.fullscreen-level #harmonic-select,
+body.fullscreen-level #spectro-section,
+body.fullscreen-level #bottom-overlay {
+  display: none !important;
+}
+body.fullscreen-level #level-history-section { flex: 1; }
+body.fullscreen-level #level-history-wrap { height: auto; flex: 1; }
+
 #info-bar {
 display: flex; align-items: center; gap: 14px;
 padding: 2px 2px;
@@ -305,13 +318,13 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   <div id="beat-bar"><span id="beat-bar-empty">Select a harmonic above to show beat frequency</span></div>
   <div id="controls">
     <div class="ctrl-row">
-      <span class="ctrl-label">GAIN</span>
-      <input type="range" id="sl-gain" min="10" max="90" step="1" value="70">
-      <span class="ctrl-val" id="vl-gain">70 dB</span>
+      <span class="ctrl-label">明るさ</span>
+      <input type="range" id="sl-gain" min="-50" max="0" step="1" value="-20">
+      <span class="ctrl-val" id="vl-gain">-20 dB</span>
     </div>
     <div class="ctrl-row">
-      <span class="ctrl-label">RANGE</span>
-      <input type="range" id="sl-range" min="24" max="96" step="1" value="96">
+      <span class="ctrl-label">コントラスト</span>
+      <input type="range" id="sl-range" min="5" max="200" step="1" value="96">
       <span class="ctrl-val" id="vl-range">96 dB</span>
     </div>
     <div class="ctrl-row">
@@ -361,7 +374,7 @@ let micOn        = false;
 const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050];
 let targetSampleRate = 16000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
-let spectroGain  = 70;  // dB — brightness: shifts the whole color mapping up/down (higher = brighter overall)
+let spectroGain  = 70;  // dB — brightness: shifts the whole color mapping up/down (higher = brighter overall). Shown in the UI as 明るさ -20dB (see GAIN_UI_TO_INTERNAL_OFFSET below, which maps the 0〜-50dB slider onto this 10〜90 internal scale).
 let spectroRange = 96;  // dB — contrast: the dB span the color mapping is stretched across (lower = punchier/more contrasty, higher = smoother/flatter gradient)
 let refPitch     = REF_PITCH_DEFAULT;
 let logScale     = false; // default linear like reference app
@@ -433,6 +446,7 @@ function timelineStopDb()  { return timelineOnsetDb() - 1; }
 let audioCtx=null, analyser=null, gainNode=null, stream=null, fftData=null, timeData=null, rafId=null;
 let analyserDisplay=null, fftDataDisplay=null;
 let analyserDisplayLow=null, fftDataDisplayLow=null; // fine-resolution analyser for the low register (see DISPLAY_FFT_SIZE_LOW)
+let fftDataDisplayLowSmooth=null; // time-smoothed (EMA, power domain) copy of fftDataDisplayLow, display-only
 // Noise profile subtraction: captures a short average of the room's
 // steady background noise (in linear amplitude, per display-FFT bin),
 // then subtracts it from every subsequent frame before color-mapping.
@@ -1241,7 +1255,7 @@ function pushBeatSample(h, val) {
   if (hist.length>BEAT_SMOOTH) hist.shift();
 }
 
-function detectBeat(data, sr, hFreq) {
+function detectBeat(data, sr, hFreq, maxPlausibleSepHz) {
   if (!hFreq) return null;
   const binSize=sr/FFT_SIZE;
   const winHz=Math.max(12,hFreq*0.012);
@@ -1286,7 +1300,19 @@ function detectBeat(data, sr, hFreq) {
     // stand well proud of the surrounding window; sidelobe/noise
     // pairings fail one or both of these.
     const prominenceOK = (top2[0].v - winMean) >= 4 && (top2[1].v - winMean) >= 4;
-    if (sepHz >= MIN_DIFF_SEP_HZ && lvlDiff <= 8 && prominenceOK) {
+    // Plausibility gate against the fundamental's own measured beat
+    // rate (see caller): two genuinely detuned strings produce a
+    // per-harmonic beat spacing that scales roughly linearly with
+    // harmonic number (H2's two partials are ~2x as far apart as H1's,
+    // H3 ~3x, etc. — confirmed against a reference spectrogram showing
+    // real-world unison beats recurring at essentially the same RATE
+    // across every harmonic band, meaning the underlying Hz gap grows
+    // proportionally). A sepHz wildly beyond that expectation is almost
+    // always a sidelobe or a neighboring partial being mistaken for the
+    // second string, not a real detuning — especially at high harmonics
+    // where the search window is widest and partials are densest.
+    const plausible = maxPlausibleSepHz===undefined || sepHz <= maxPlausibleSepHz;
+    if (sepHz >= MIN_DIFF_SEP_HZ && lvlDiff <= 8 && prominenceOK && plausible) {
       // Determine direction: the peak above the theoretical reference
       // frequency (hFreq) is taken to be the string being tuned/moved.
       // If that peak sits above hFreq, the beat is reported as
@@ -1389,7 +1415,30 @@ function renderLoop() {
   analyser.getFloatFrequencyData(fftData);
   analyser.getFloatTimeDomainData(timeData);
   if (analyserDisplay && fftDataDisplay) analyserDisplay.getFloatFrequencyData(fftDataDisplay);
-  if (analyserDisplayLow && fftDataDisplayLow) analyserDisplayLow.getFloatFrequencyData(fftDataDisplayLow);
+  if (analyserDisplayLow && fftDataDisplayLow) {
+    analyserDisplayLow.getFloatFrequencyData(fftDataDisplayLow);
+    // Extra time-domain smoothing for the low-register display bins,
+    // on top of the analyser's own smoothingTimeConstant. The 2048-pt
+    // FFT's fine frequency resolution makes a sustained piano partial's
+    // peak bin wobble by a bin or so as its pitch decays/wavers, which
+    // the analyser's smoothing (applied per-bin, not in a way that
+    // follows the peak) doesn't fully hide — it read as a beaded/pinched
+    // band instead of the smooth continuous one the high register gets
+    // from its coarser, naturally-blurred 512-pt FFT. A power-domain EMA
+    // here softens that frame-to-frame jitter without touching the
+    // separate pitch/beat-detection data path (fftData/analyser, 8192pt).
+    if (!fftDataDisplayLowSmooth || fftDataDisplayLowSmooth.length !== fftDataDisplayLow.length) {
+      fftDataDisplayLowSmooth = Float32Array.from(fftDataDisplayLow);
+    } else {
+      const a = 0.45; // weight on the new frame; lower = smoother/laggier
+      for (let i=0;i<fftDataDisplayLow.length;i++) {
+        const prevLin = Math.pow(10, fftDataDisplayLowSmooth[i]/10);
+        const curLin = Math.pow(10, fftDataDisplayLow[i]/10);
+        const mixLin = a*curLin + (1-a)*prevLin;
+        fftDataDisplayLowSmooth[i] = 10*Math.log10(Math.max(1e-12, mixLin));
+      }
+    }
+  }
   if (noiseCapturing && fftDataDisplay) {
     if (!noiseCaptureAccum) noiseCaptureAccum = new Float32Array(fftDataDisplay.length);
     for (let i=0; i<fftDataDisplay.length; i++) noiseCaptureAccum[i] += Math.pow(10, fftDataDisplay[i]/20);
@@ -1490,11 +1539,25 @@ function renderLoop() {
       ampEnv[k]=[]; lastPeakTime[k]=null; noteStartTime[k]=null; lastTroughDb[k]=null; beatPeakTimes[k]=[];
     }
   }
+  // Reference beat spacing (Hz) measured on the fundamental, used below
+  // to sanity-check diff-mode detections on higher harmonics — see
+  // detectBeat's plausibility gate. Falls back to undefined (no gate)
+  // if H1 itself isn't currently reporting a diff-mode reading, so this
+  // only constrains harmonics once we have real evidence to compare
+  // against, never blocks H1 itself.
+  let fundamentalSepHz = undefined;
   for (let h=0;h<NUM_H;h++) {
     const hfTheory=currentFreq?currentFreq*(h+1):null;
     const hf=hfTheory?refineHarmonicFreq(fftData,sr,hfTheory,h):null;
     harmonicFreqRefined[h]=hf;
-    const result=detectBeat(fftData,sr,hf);
+    // Allow some margin over pure linear scaling (inharmonicity makes
+    // higher partials' detuning grow a bit faster than strict
+    // proportionality, especially on bass strings), but still reject
+    // anything wildly past what the fundamental's own measured spacing
+    // predicts for this harmonic number.
+    const maxPlausibleSepHz = fundamentalSepHz!==undefined ? fundamentalSepHz*(h+1)*2.5 : undefined;
+    const result=detectBeat(fftData,sr,hf,maxPlausibleSepHz);
+    if (h===0 && result && result.type==="diff") fundamentalSepHz = result.beat;
     const curDb = result ? result.db : -Infinity;
 
     if (result && result.type==="diff") {
@@ -1633,7 +1696,8 @@ function drawSpectroColumn() {
       // Fine-resolution sample for the low register
       const fbL = freq/binSizeLow;
       const bL0 = Math.floor(fbL), frL = fbL-bL0;
-      const sL=(b)=>(b>=0&&b<fftDataDisplayLow.length)?fftDataDisplayLow[b]:-120;
+      const lowSrc = fftDataDisplayLowSmooth || fftDataDisplayLow;
+      const sL=(b)=>(b>=0&&b<lowSrc.length)?lowSrc[b]:-120;
       let dbLraw = sL(bL0)+(sL(bL0+1)-sL(bL0))*frL;
       // Thicken the low-register bands. The 2048-pt analyser resolves
       // bass partials so finely that H1/H2 rendered as hair-thin lines
@@ -1650,18 +1714,25 @@ function drawSpectroColumn() {
       // (band 7 and up, drawn from the single high-res FFT, naturally
       // tapers off and reads as round/soft), so this keeps the same
       // soft, rounded look consistent across the whole spectrogram.
+      //
+      // sigma (the blend's softness) varies CONTINUOUSLY with frequency;
+      // only the scan radius is an integer (it has to be, to index
+      // bins), and it's kept wide enough that sigma alone controls the
+      // taper everywhere below the crossover. Previously the radius
+      // itself was rounded to 0/1/2 bins, so sigma collapsed to 0 a
+      // good deal below the crossover (e.g. ~560Hz) and every band from
+      // there up to the crossover rendered hairline-thin again — the
+      // visible mismatch between the "thick" low end and the thin H6.
       const widenFrac = 1 - Math.min(1, freq/DISPLAY_XOVER_HI_HZ);
-      const widenBins = Math.round(2*widenFrac); // up to ±2 fine bins at the very bottom
-      if (widenBins > 0) {
+      const sigma = Math.max(0.35, 2.2*widenFrac); // smoothly shrinks to ~0.35 bins at the crossover, never hits 0
+      const widenBins = Math.max(1, Math.round(2.5*sigma)); // scan radius wide enough to cover the Gaussian's tail
+      {
         const linCenter = Math.pow(10, dbLraw/10); // power domain for energy blending
         let wSum = 1, linSum = linCenter;
         for (let wb=-widenBins; wb<=widenBins; wb++) {
           if (wb===0) continue;
           const v = sL(bL0+wb);
-          // Gaussian falloff: sigma chosen so the outermost tap still
-          // contributes meaningfully (soft skirt) without flattening
-          // the peak into a plateau.
-          const wgt = Math.exp(-(wb*wb) / (2*Math.max(0.6, widenBins*0.75)**2));
+          const wgt = Math.exp(-(wb*wb) / (2*sigma*sigma));
           linSum += Math.pow(10, v/10) * wgt;
           wSum += wgt;
         }
@@ -1926,7 +1997,7 @@ function dbToLevelScale(db) {
 // maximum (full-scale raw signal) only reaches 96, so 100/120 sit in
 // a deliberate headroom band at the top of the chart — same idea as
 // the headroom above 0dBFS on a hardware level meter.
-const LEVEL_SCALE_MIN = 20, LEVEL_SCALE_MAX = 130, LEVEL_SCALE_STEP = 10; // 10dB divides 110 evenly (11 steps), so every gridline is uniformly spaced with none left over
+const LEVEL_SCALE_MIN = 50, LEVEL_SCALE_MAX = 130, LEVEL_SCALE_STEP = 10; // 10dB divides 80 evenly (8 steps), so every gridline is uniformly spaced with none left over
 function levelToY(levelVal, H) {
   return H * (1 - (levelVal - LEVEL_SCALE_MIN) / (LEVEL_SCALE_MAX - LEVEL_SCALE_MIN));
 }
@@ -2076,9 +2147,20 @@ function resetState() {
 }
 
 // ── Controls ───────────────────────────────────────────────
+// The 明るさ (brightness) slider is shown VoceVista-style: 0dB at the
+// top end (brightest/reference) down to -50dB (dimmer) — the opposite
+// sense and a different zero-point from the internal spectroGain
+// value that dbToRGB actually uses (10–90, larger = brighter, a plain
+// additive offset in dB). GAIN_UI_TO_INTERNAL_OFFSET converts between
+// the two without touching dbToRGB or anything else that already
+// depends on spectroGain's original scale: internal = offset + UI
+// value, so UI 0dB → spectroGain 90 (brightest) and UI -50dB →
+// spectroGain 40.
+const GAIN_UI_TO_INTERNAL_OFFSET = 90;
 document.getElementById("sl-gain").addEventListener("input", function() {
-  spectroGain=parseInt(this.value);
-  document.getElementById("vl-gain").textContent=spectroGain+" dB";
+  const uiVal = parseInt(this.value);
+  spectroGain = GAIN_UI_TO_INTERNAL_OFFSET + uiVal;
+  document.getElementById("vl-gain").textContent=uiVal+" dB";
 });
 document.getElementById("sl-range").addEventListener("input", function() {
   spectroRange=parseInt(this.value);
@@ -2181,6 +2263,40 @@ document.getElementById("fullscreen-btn").addEventListener("click", function() {
   // harmonic selection does.
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ initCanvas(); }));
 });
+
+// Swipe up/down on the Sound Level graph to toggle its own fullscreen
+// mode (fullscreen-level, see CSS above) — independent of the
+// spectrogram's FULL button. A vertical swipe is distinguished from an
+// incidental tap/wobble by a minimum travel distance, and from a
+// horizontal gesture by requiring most of the movement to be
+// vertical, so this doesn't fight with anything else on this element
+// (the Sound Level graph has no horizontal pan/zoom of its own).
+let levelSwipeMode = false;
+let levelSwipeY0 = null, levelSwipeX0 = null, levelSwipeHandled = false;
+const LEVEL_SWIPE_MIN_PX = 40;
+const levelSection = document.getElementById("level-history-section");
+levelSection.addEventListener("touchstart", e => {
+  if (e.touches.length !== 1) return;
+  levelSwipeY0 = e.touches[0].clientY;
+  levelSwipeX0 = e.touches[0].clientX;
+  levelSwipeHandled = false;
+}, {passive:true});
+levelSection.addEventListener("touchmove", e => {
+  if (levelSwipeHandled || levelSwipeY0 === null || e.touches.length !== 1) return;
+  const dy = e.touches[0].clientY - levelSwipeY0;
+  const dx = e.touches[0].clientX - levelSwipeX0;
+  if (Math.abs(dy) < LEVEL_SWIPE_MIN_PX || Math.abs(dy) < Math.abs(dx)) return;
+  // Swipe up (dy<0) enters fullscreen; swipe down (dy>0) leaves it —
+  // matches the natural "pull this panel open upward / push it back
+  // down" feel, and either direction also just toggles out of it if
+  // already in fullscreen so the gesture is never a dead end.
+  levelSwipeMode = (dy < 0) ? true : (dy > 0 ? false : levelSwipeMode);
+  document.body.classList.toggle("fullscreen-level", levelSwipeMode);
+  levelSwipeHandled = true;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ reinitAllCanvases(); }));
+}, {passive:true});
+levelSection.addEventListener("touchend", () => { levelSwipeY0 = null; }, {passive:true});
+levelSection.addEventListener("touchcancel", () => { levelSwipeY0 = null; }, {passive:true});
 
 document.getElementById("tags-toggle").addEventListener("click", function() {
   showTags=!showTags;
