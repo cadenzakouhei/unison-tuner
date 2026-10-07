@@ -190,7 +190,7 @@ padding: 8px 12px; display: flex; flex-direction: column;
 gap: 8px; flex-shrink: 0;
 }
 .ctrl-row { display: flex; align-items: center; gap: 8px; }
-.ctrl-label { font-size: 11px; color: #ccc; min-width: 50px; letter-spacing: 0.5px; }
+.ctrl-label { font-size: 11px; color: #ccc; min-width: 70px; letter-spacing: 0.5px; }
 .ctrl-row input[type=range] { flex: 1; accent-color: #3355cc; height: 22px; }
 .ctrl-val { font-size: 11px; color: #ddd; min-width: 60px; text-align: center; }
 .ctrl-btn {
@@ -318,12 +318,12 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   <div id="beat-bar"><span id="beat-bar-empty">Select a harmonic above to show beat frequency</span></div>
   <div id="controls">
     <div class="ctrl-row">
-      <span class="ctrl-label">明るさ</span>
+      <span class="ctrl-label">Brightness</span>
       <input type="range" id="sl-gain" min="-50" max="0" step="1" value="-20">
       <span class="ctrl-val" id="vl-gain">-20 dB</span>
     </div>
     <div class="ctrl-row">
-      <span class="ctrl-label">コントラスト</span>
+      <span class="ctrl-label">Contrast</span>
       <input type="range" id="sl-range" min="5" max="200" step="1" value="96">
       <span class="ctrl-val" id="vl-range">96 dB</span>
     </div>
@@ -374,7 +374,7 @@ let micOn        = false;
 const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050];
 let targetSampleRate = 16000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
-let spectroGain  = 70;  // dB — brightness: shifts the whole color mapping up/down (higher = brighter overall). Shown in the UI as 明るさ -20dB (see GAIN_UI_TO_INTERNAL_OFFSET below, which maps the 0〜-50dB slider onto this 10〜90 internal scale).
+let spectroGain  = 70;  // dB — brightness: shifts the whole color mapping up/down (higher = brighter overall). Shown in the UI as Brightness -20dB (see GAIN_UI_TO_INTERNAL_OFFSET below, which maps the 0〜-50dB slider onto this 10〜90 internal scale).
 let spectroRange = 96;  // dB — contrast: the dB span the color mapping is stretched across (lower = punchier/more contrasty, higher = smoother/flatter gradient)
 let refPitch     = REF_PITCH_DEFAULT;
 let logScale     = false; // default linear like reference app
@@ -2147,7 +2147,7 @@ function resetState() {
 }
 
 // ── Controls ───────────────────────────────────────────────
-// The 明るさ (brightness) slider is shown VoceVista-style: 0dB at the
+// The Brightness slider is shown VoceVista-style: 0dB at the
 // top end (brightest/reference) down to -50dB (dimmer) — the opposite
 // sense and a different zero-point from the internal spectroGain
 // value that dbToRGB actually uses (10–90, larger = brighter, a plain
