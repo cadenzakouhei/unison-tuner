@@ -254,8 +254,12 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
 </div>
 
 <div class="section-label">
-  <span>FFT / Spectrogram (H1–H8)</span>
+  <span id="spectro-title">FFT / Spectrogram (H1–H8)</span>
   <div style="display:flex;align-items:center;gap:6px;">
+    <span id="graph-label" style="font-size:10px;color:#ccc;">GRAPH</span>
+    <div id="graph-toggle" style="width:36px;height:20px;border-radius:10px;background:#333;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+      <div id="graph-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
+    </div>
     <span id="tags-label" style="font-size:10px;color:#ccc;">TAGS</span>
     <div id="tags-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="tags-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
@@ -1899,6 +1903,7 @@ function drawSpectroColumn() {
     return p(b0)+(p(b0+1)-p(b0))*fr;
   };
   const hasLow = !!fftDataDisplayLow;
+  if (spectroRowDb.length !== H) { spectroRowDb = new Float32Array(H); spectroRowRaw = new Float32Array(H); graphLevel = null; }
   for (let py=0;py<H;py++) {
     const freq=yToFreq(py,H);
     const fbin=freq/binSizeDisplay;
@@ -1914,6 +1919,7 @@ function drawSpectroColumn() {
     // background out in bright yellow/orange instead of staying dark.
     const dbHigh = dbRaw - DISPLAY_FFT_NOISE_FLOOR_OFFSET;
     let db = dbHigh;
+    let rawRow = dbRaw; // uncompensated level, for the GRAPH view's dB axis
     if (hasLow && freq < DISPLAY_XOVER_HI_HZ) {
       // Fine-resolution sample for the low register
       const fbL = freq/binSizeLow;
@@ -1967,11 +1973,15 @@ function drawSpectroColumn() {
       const dbLow = dbLraw - DISPLAY_FFT_LOW_NOISE_FLOOR_OFFSET;
       if (freq <= DISPLAY_XOVER_LO_HZ) {
         db = dbLow;
+        rawRow = dbLraw;
       } else {
         const w = (freq - DISPLAY_XOVER_LO_HZ) / (DISPLAY_XOVER_HI_HZ - DISPLAY_XOVER_LO_HZ);
         db = dbLow*(1-w) + dbHigh*w;
+        rawRow = dbLraw*(1-w) + dbRaw*w;
       }
     }
+    spectroRowDb[py] = db;
+    spectroRowRaw[py] = rawRow;
     const [r,g,b]=dbToRGB(db);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
@@ -1989,7 +1999,99 @@ function drawSpectroColumn() {
       offCtx.beginPath(); offCtx.moveTo(colX,py); offCtx.lineTo(colX+colW,py); offCtx.stroke();
     }
   }
-  spectroCtx.drawImage(offCanvas,0,0);
+  // The spectrogram history keeps scrolling in the background either
+  // way, so switching GRAPH off resumes it without a gap.
+  if (showGraph) drawSpectrumGraph();
+  else spectroCtx.drawImage(offCanvas,0,0);
+}
+
+// ── GRAPH view: live spectrum as a smooth line ─────────────
+// Same vertical frequency axis as the spectrogram (left ruler, zoom,
+// scroll and LIN/LOG all shared, since it reads the very rows
+// drawSpectroColumn just computed); horizontally, level grows to the
+// right on the same calibrated scale as the Sound Level graph
+// (dbToLevelScale), GRAPH_DB_MIN〜GRAPH_DB_MAX. Each row is coloured
+// exactly as the spectrogram would colour it, so the colour scale on
+// the right still reads the same.
+const GRAPH_DB_MIN = 40, GRAPH_DB_MAX = 120, GRAPH_DB_STEP = 10;
+const GRAPH_SMOOTH = 0.45; // weight of the newest frame (lower = calmer, slower line)
+let spectroRowDb = new Float32Array(0), spectroRowRaw = new Float32Array(0), graphLevel = null;
+function drawSpectrumGraph() {
+  const W = spectroCanvas.width, H = spectroCanvas.height;
+  if (!W || !H) return;
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = spectroCtx;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+  const xOf = (lv) => W * Math.max(0, Math.min(1, (lv - GRAPH_DB_MIN) / (GRAPH_DB_MAX - GRAPH_DB_MIN)));
+
+  // Vertical gridlines every GRAPH_DB_STEP dB.
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+  for (let lv = GRAPH_DB_MIN; lv <= GRAPH_DB_MAX; lv += GRAPH_DB_STEP) {
+    const x = Math.round(xOf(lv)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  const haveRows = spectroRowRaw.length === H && spectroRowDb.length === H;
+  if (haveRows) {
+    // Temporal smoothing so the line swells and settles smoothly
+    // instead of flickering frame to frame.
+    if (!graphLevel || graphLevel.length !== H) graphLevel = Float32Array.from(spectroRowRaw, dbToLevelScale);
+    for (let py = 0; py < H; py++) {
+      graphLevel[py] = graphLevel[py]*(1-GRAPH_SMOOTH) + dbToLevelScale(spectroRowRaw[py])*GRAPH_SMOOTH;
+    }
+    // Area under the line, each row in its spectrogram colour.
+    for (let py = 0; py < H; py++) {
+      const x = xOf(graphLevel[py]);
+      if (x <= 0) continue;
+      const [r,g,b] = dbToRGB(spectroRowDb[py]);
+      ctx.fillStyle = `rgba(${r},${g},${b},0.35)`;
+      ctx.fillRect(0, py, x, 1);
+    }
+    // The line itself: quadratic segments through the row points
+    // (midpoint-to-midpoint), each piece in its own row colour.
+    const step = Math.max(1, Math.round(dpr));
+    const pts = [];
+    for (let py = 0; py < H; py += step) pts.push([xOf(graphLevel[py]), py, spectroRowDb[py]]);
+    ctx.lineWidth = 2*dpr;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let i = 1; i < pts.length-1; i++) {
+      const [x0,y0] = pts[i-1], [x1,y1,db1] = pts[i], [x2,y2] = pts[i+1];
+      const [r,g,b] = dbToRGB(db1);
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      ctx.beginPath();
+      ctx.moveTo((x0+x1)/2, (y0+y1)/2);
+      ctx.quadraticCurveTo(x1, y1, (x1+x2)/2, (y1+y2)/2);
+      ctx.stroke();
+    }
+  }
+
+  // Faint marker lines at the harmonics, as on the spectrogram.
+  if (currentFreq) {
+    ctx.strokeStyle = "rgba(255,220,0,0.25)";
+    ctx.lineWidth = dpr;
+    for (let h = 0; h < NUM_H; h++) {
+      const hf = harmonicFreqRefined[h];
+      if (!hf || hf < viewLo || hf > viewHi) continue;
+      const y = freqToY(hf, H);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+  }
+
+  // Level axis along the bottom: 40 (quiet, left) … 120dB (loud, right).
+  const axisH = 16*dpr;
+  ctx.fillStyle = "rgba(0,0,0,0.75)";
+  ctx.fillRect(0, H-axisH, W, axisH);
+  ctx.fillStyle = "#aaa";
+  ctx.font = `${9*dpr}px -apple-system, sans-serif`;
+  ctx.textBaseline = "middle";
+  for (let lv = GRAPH_DB_MIN; lv <= GRAPH_DB_MAX; lv += GRAPH_DB_STEP) {
+    const label = lv === GRAPH_DB_MAX ? lv + "dB" : String(lv);
+    const tw = ctx.measureText(label).width;
+    const x = Math.max(2*dpr, Math.min(W - tw - 2*dpr, xOf(lv) - tw/2));
+    ctx.fillText(label, x, H - axisH/2);
+  }
 }
 
 // ── Freq axis labels ───────────────────────────────────────
@@ -2507,6 +2609,21 @@ levelSection.addEventListener("touchmove", e => {
 }, {passive:true});
 levelSection.addEventListener("touchend", () => { levelSwipeY0 = null; }, {passive:true});
 levelSection.addEventListener("touchcancel", () => { levelSwipeY0 = null; }, {passive:true});
+
+// GRAPH: swap the spectrogram for the live spectrum line graph (see
+// drawSpectrumGraph). Off by default; the spectrogram keeps recording
+// underneath, so switching back loses nothing.
+let showGraph = false;
+document.getElementById("graph-toggle").addEventListener("click", function() {
+  showGraph=!showGraph;
+  this.style.background=showGraph?"#446622":"#333";
+  document.getElementById("graph-knob").style.left=showGraph?"18px":"2px";
+  document.getElementById("spectro-title").textContent = showGraph ? "FFT / Spectrum (H1–H8)" : "FFT / Spectrogram (H1–H8)";
+  graphLevel = null;
+  // Repaint immediately (also when the mic is off and no frames are running).
+  if (showGraph) drawSpectrumGraph();
+  else if (offCanvas) spectroCtx.drawImage(offCanvas,0,0);
+});
 
 document.getElementById("tags-toggle").addEventListener("click", function() {
   showTags=!showTags;
