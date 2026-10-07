@@ -2006,6 +2006,11 @@ function drawSpectroColumn() {
         rawRow = dbLraw*(1-w) + dbRaw*w;
       }
     }
+    // Right after the mic (re)starts — e.g. on a sample-rate change —
+    // the analysers report -Infinity dB for every bin, and interpolating
+    // between two -Infinity bins gives NaN. Treat those rows as silence.
+    if (!isFinite(db)) db = -120;
+    if (!isFinite(rawRow)) rawRow = -120;
     spectroRowDb[py] = db;
     spectroRowRaw[py] = rawRow;
     const [r,g,b]=dbToRGB(db);
@@ -2063,9 +2068,16 @@ function drawSpectrumGraph() {
   if (haveRows) {
     // Temporal smoothing so the line swells and settles smoothly
     // instead of flickering frame to frame.
-    if (!graphLevel || graphLevel.length !== H) graphLevel = Float32Array.from(spectroRowRaw, dbToLevelScale);
+    // (A non-finite value must never enter this running average: once
+    // one NaN got in — from the first silent frames after a sample-rate
+    // change — that row stayed NaN forever and the upper part of the
+    // graph vanished. Restart any such row from the current value.)
+    if (!graphLevel || graphLevel.length !== H) graphLevel = new Float32Array(H).fill(NaN);
     for (let py = 0; py < H; py++) {
-      graphLevel[py] = graphLevel[py]*(1-GRAPH_SMOOTH) + dbToLevelScale(spectroRowRaw[py])*GRAPH_SMOOTH;
+      let cur = dbToLevelScale(spectroRowRaw[py]);
+      if (!isFinite(cur)) cur = 0;
+      const prev = graphLevel[py];
+      graphLevel[py] = isFinite(prev) ? prev*(1-GRAPH_SMOOTH) + cur*GRAPH_SMOOTH : cur;
     }
     // Area under the line, each row in its spectrogram colour.
     for (let py = 0; py < H; py++) {
@@ -2473,7 +2485,7 @@ function resetLevelHistory() {
 function resetState() {
   currentFreq=null; pendingFreq=null; pendingCount=0; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
-  beatRejectCount=new Array(NUM_H).fill(0); lastBeatNoteName=null; beatF0=null; strikePeakDb=-Infinity;
+  beatRejectCount=new Array(NUM_H).fill(0); lastBeatNoteName=null; beatF0=null; strikePeakDb=-Infinity; graphLevel=null;
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
   beatPeakTimes=Array.from({length:NUM_H},()=>[]);
