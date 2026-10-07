@@ -101,7 +101,7 @@ overflow: hidden; border: 1px solid #333; min-width: 0;
 .section-label {
 background: #1a1a1a; border-top: 1px solid #333; border-bottom: 1px solid #333;
 padding: 4px 12px; font-size: 11px; color: #ddd;
-display: flex; justify-content: space-between; align-items: center;
+display: flex; justify-content: space-between; align-items: center; gap: 8px;
 flex-shrink: 0;
 }
 
@@ -253,9 +253,9 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
   </div>
 </div>
 
-<div class="section-label">
+<div class="section-label" style="flex-wrap:wrap;row-gap:4px;">
   <span id="spectro-title">FFT / Spectrogram (H1–H8)</span>
-  <div style="display:flex;align-items:center;gap:6px;">
+  <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:auto;">
     <span id="graph-label" style="font-size:10px;color:#ccc;">GRAPH</span>
     <div id="graph-toggle" style="width:36px;height:20px;border-radius:10px;background:#333;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="graph-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
@@ -272,7 +272,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
     </div>
-    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">8000 Hz</button>
+    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 4px;font-family:-apple-system,sans-serif;">8000 Hz</button>
   </div>
 </div>
 
@@ -475,6 +475,18 @@ let beatFrameMsEma = 1000/60, lastBeatFrameT = null;
 // Re-strike detection state (see the detection loop).
 const RESTRIKE_JUMP_DB = 10;      // rise above the last 300ms minimum
 const RESTRIKE_ABOVE_PREV_DB = 3; // ...and above the loudest level 0.3-2s earlier
+let strikePeakDb = -Infinity; // loudest broadband level since the last strike
+let beatF0 = null;            // fundamental locked for beat analysis (see the note-change logic)
+// A note-name change counts as a new note only within this many dB of
+// the strike's peak level (or shortly after a strike) — see above.
+const NOTE_CHANGE_MAX_DROP_DB = 15;
+// Absolute level floor for envelope tracking. Whether a harmonic is
+// measurable is decided by its signal-to-noise ratio (BEAT_MIN_SNR_DB);
+// this floor only keeps near-silence out. It used to be AMP_TRACK_MIN_DB
+// (-55dB), which real piano recordings showed was far too high: upper
+// partials (H3-H6 of A3) fell below it 2-4s after the strike while still
+// ~30dB above the noise, so their cards never got a reading ("—").
+const AMP_TRACK_FLOOR_DB = -85;
 let strikeLevelHist = [], lastRestrikeT = -Infinity;
 function countableBeatHz() { return Math.min(MAX_COUNTABLE_BEAT_HZ, (1000/beatFrameMsEma)/7); }
 // Shown instead of a number when beating is clearly present but too fast
@@ -1643,20 +1655,6 @@ function renderLoop() {
       sustainArmed = true; // previous strike has decayed below the threshold — ready for the next one
     }
   }
-  // A different NOTE means everything measured so far belongs to the
-  // previous note — carrying its beat history (and its median gate)
-  // into the new one both showed stale numbers and could block the
-  // new note's genuine readings from ever registering. Reset all
-  // per-harmonic beat state the moment the detected note changes.
-  const curNoteInfo = currentFreq ? freqToNote(currentFreq) : null;
-  if (curNoteInfo && curNoteInfo.name !== lastBeatNoteName) {
-    lastBeatNoteName = curNoteInfo.name;
-    for (let k=0;k<NUM_H;k++) {
-      beatHistory[k]=[]; beatRejectCount[k]=0; lastBeatRate[k]=null;
-      ampEnv[k]=[]; lastPeakTime[k]=null; noteStartTime[k]=null; lastTroughDb[k]=null; beatPeakTimes[k]=[];
-      beatDisp[k]=null; statusVals[k]=0;
-    }
-  }
   // Re-strike detection. Tuning means striking the SAME key over and
   // over while turning the pin, so a fresh measurement must start on
   // every strike — not only when the note name changes — or the peaks
@@ -1669,11 +1667,12 @@ function renderLoop() {
   // On a re-strike every tracked harmonic starts a new run and its card
   // goes back to "—" until the new run has measured something, so a
   // reading from before the pin was turned is never shown as current.
+  let bbDb = -Infinity, struck = false;
   if (timeData) {
     const nS = Math.min(timeData.length, Math.max(32, Math.round(0.03*sr)));
     let acc = 0;
     for (let i = timeData.length-nS; i < timeData.length; i++) acc += timeData[i]*timeData[i];
-    const bbDb = 10*Math.log10(acc/nS + 1e-20);
+    bbDb = 10*Math.log10(acc/nS + 1e-20);
     strikeLevelHist.push({t:now, db:bbDb});
     while (strikeLevelHist.length && now - strikeLevelHist[0].t > 2000) strikeLevelHist.shift();
     let minRecent = Infinity, maxEarlier = -Infinity;
@@ -1683,10 +1682,37 @@ function renderLoop() {
       else maxEarlier = Math.max(maxEarlier, e.db);
     }
     if (bbDb - minRecent >= RESTRIKE_JUMP_DB && bbDb >= maxEarlier + RESTRIKE_ABOVE_PREV_DB && now - lastRestrikeT > 300) {
-      lastRestrikeT = now;
+      lastRestrikeT = now; struck = true; strikePeakDb = bbDb;
       for (let k=0;k<NUM_H;k++) { noteStartTime[k] = null; beatDisp[k] = null; statusVals[k] = 0; }
     }
+    if (bbDb > strikePeakDb) strikePeakDb = bbDb;
   }
+  // A different NOTE means everything measured so far belongs to the
+  // previous note, so all per-harmonic beat state is reset — but only
+  // for a GENUINE new note: one that arrives with a strike (within
+  // 1.5s of one) or at a level near the strike's peak. Deep in a
+  // note's decay the pitch tracker wanders (real recordings showed a
+  // ringing A3 read as E3, D#2, G#3 as it faded); treating those as
+  // new notes wiped every card back to "—" while the A3 was still
+  // ringing and being measured perfectly well.
+  const curNoteInfo = currentFreq ? freqToNote(currentFreq) : null;
+  if (curNoteInfo && curNoteInfo.name !== lastBeatNoteName) {
+    const genuine = lastBeatNoteName === null || now - lastRestrikeT < 1500 || bbDb > strikePeakDb - NOTE_CHANGE_MAX_DROP_DB;
+    if (genuine) {
+      lastBeatNoteName = curNoteInfo.name;
+      beatF0 = currentFreq;
+      for (let k=0;k<NUM_H;k++) {
+        beatHistory[k]=[]; beatRejectCount[k]=0; lastBeatRate[k]=null;
+        ampEnv[k]=[]; lastPeakTime[k]=null; noteStartTime[k]=null; lastTroughDb[k]=null; beatPeakTimes[k]=[];
+        beatDisp[k]=null; statusVals[k]=0;
+      }
+    }
+  }
+  // Fundamental the beat analysis follows: the live pitch while it
+  // still names the struck note (so small drifts are tracked), the
+  // pitch locked at that note otherwise (see above).
+  if (curNoteInfo && curNoteInfo.name === lastBeatNoteName) beatF0 = currentFreq;
+  const f0b = beatF0 || currentFreq;
   if (lastBeatFrameT !== null) {
     const dt = Math.max(5, Math.min(100, now - lastBeatFrameT));
     beatFrameMsEma = beatFrameMsEma*0.95 + dt*0.05;
@@ -1701,7 +1727,7 @@ function renderLoop() {
   // against, never blocks H1 itself.
   let fundamentalSepHz = undefined;
   for (let h=0;h<NUM_H;h++) {
-    const hfTheory=currentFreq?currentFreq*(h+1):null;
+    const hfTheory=f0b?f0b*(h+1):null;
     const hf=hfTheory?refineHarmonicFreq(fftData,sr,hfTheory,h):null;
     harmonicFreqRefined[h]=hf;
     // Allow some margin over pure linear scaling (inharmonicity makes
@@ -1723,11 +1749,11 @@ function renderLoop() {
     // window is stretched for very low notes so it always spans a few
     // periods of the fundamental.
     let envDb = null, envSnr = -Infinity, envSnrOk = false;
-    if (result && result.type==="amp" && selH[h] && result.db >= AMP_TRACK_MIN_DB) {
-      const envWin = Math.max(ENV_WIN_SEC, currentFreq ? 3/currentFreq : 0);
+    if (result && result.type==="amp" && selH[h] && result.db >= AMP_TRACK_FLOOR_DB) {
+      const envWin = Math.max(ENV_WIN_SEC, f0b ? 3/f0b : 0);
       envDb = demodEnvelopeDb(timeData, sr, hf, envWin);
       if (isFinite(envDb)) {
-        const noiseDb = demodEnvelopeDb(timeData, sr, hf + (currentFreq ? currentFreq/2 : hf*0.05), envWin);
+        const noiseDb = demodEnvelopeDb(timeData, sr, hf + (f0b ? f0b/2 : hf*0.05), envWin);
         envSnr = envDb - noiseDb;
         envSnrOk = envSnr >= BEAT_MIN_SNR_DB;
       }
@@ -2447,7 +2473,7 @@ function resetLevelHistory() {
 function resetState() {
   currentFreq=null; pendingFreq=null; pendingCount=0; statusVals=new Array(NUM_H).fill(0);
   beatHistory=Array.from({length:NUM_H},()=>[]); beatNullCount=new Array(NUM_H).fill(0);
-  beatRejectCount=new Array(NUM_H).fill(0); lastBeatNoteName=null;
+  beatRejectCount=new Array(NUM_H).fill(0); lastBeatNoteName=null; beatF0=null; strikePeakDb=-Infinity;
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
   beatPeakTimes=Array.from({length:NUM_H},()=>[]);
