@@ -434,6 +434,61 @@ const TIMELINE_RELEASE_DB_PER_FRAME = 1.2; // dB/frame decay — bridges brief d
 
 const ENV_KEEP_MS  = 3000;  // how much recent envelope history we need to detect a local max
 const PEAK_MIN_GAP_MS = 100; // ~10 Hz ceiling — refuse peaks closer together than this
+// Beat envelope source (v1.1): the per-harmonic amplitude envelope is
+// read by narrow-band demodulation of the most recent ENV_WIN_SEC of
+// raw samples at the harmonic's own frequency — NOT from the 8192-pt
+// FFT bin. That FFT spans 8192 samples (1.02s at 8000Hz, 0.37s at
+// 22050Hz), which averages away any beat faster than roughly one
+// cycle per window: at the default 8000Hz rate even a 1Hz beat was
+// largely invisible to the envelope tracker. A ~0.1s window follows
+// beats up to several Hz at any sample rate, while its ~±10Hz
+// bandwidth still keeps both strings of a unison inside it (their
+// interference IS the beat) and the note's neighbouring partials out.
+const ENV_WIN_SEC = 0.1;
+// Peak/trough smoothing half-width, in frames. The demodulation
+// window already smooths, so only a light extra pass is needed; the
+// old 7 (a ~0.25s boxcar at 60fps) flattened anything above ~2Hz.
+const ENV_SMOOTH_HALFWIN = 2;
+// No beat may be reported (not even 0) until a harmonic has been
+// tracked this long — before that, "no peak yet" can't be told apart
+// from "slow beat that hasn't completed a cycle yet".
+const BEAT_WARMUP_MS = 1500;
+// Beats faster than ~9/s can't be counted peak-by-peak (frame rate and
+// the demodulation window blur them), but the envelope still visibly
+// churns. These detect that case so it reads ">90" instead of falsely
+// reading 0 ("in tune") — measured on synthetic unisons: no beating
+// stays ≤0.1 dB/frame of detrended wobble, unresolvable fast beating
+// ≥0.4; requiring many slope reversals too keeps a slow-but-deep beat
+// (≈1/s, before its 2nd peak arrives) from being mistaken for fast.
+const FAST_BEAT_ROUGH_DB = 0.3;   // mean |detrended frame-to-frame change|, dB
+const FAST_BEAT_MIN_FLIPS = 6;    // slope reversals within the last 0.5s
+const MAX_COUNTABLE_BEAT_HZ = 8;  // above this a peak-count rate isn't trustworthy (verified up to ~8/s at 60fps)
+// The envelope is sampled once per animation frame, so the countable
+// ceiling scales with the real frame rate (≈ fps/7: 60fps → 8/s, 30fps
+// → ~4/s). The frame interval is measured rather than assumed, since a
+// busy device can drop below 60fps.
+let beatFrameMsEma = 1000/60, lastBeatFrameT = null;
+// Re-strike detection state (see the detection loop).
+const RESTRIKE_JUMP_DB = 10;      // rise above the last 300ms minimum
+const RESTRIKE_ABOVE_PREV_DB = 3; // ...and above the loudest level 0.3-2s earlier
+let strikeLevelHist = [], lastRestrikeT = -Infinity;
+function countableBeatHz() { return Math.min(MAX_COUNTABLE_BEAT_HZ, (1000/beatFrameMsEma)/7); }
+// Shown instead of a number when beating is clearly present but too fast
+// to count. Deliberately not a figure like ">90": the countable ceiling
+// depends on the device's frame rate (at 30fps it's nearer 5/s).
+const FAST_BEAT_LABEL = "FAST";
+// Minimum envelope-to-local-noise ratio for a harmonic's envelope to be
+// trusted at all (see the noise reference in the detection loop), and
+// the stricter ratio needed before its wobble may be called FAST beating
+// — at 20-30dB the noise alone jitters the envelope enough to look fast.
+const BEAT_MIN_SNR_DB = 20;
+const FAST_BEAT_MIN_SNR_DB = 30;
+// What each harmonic's beat card currently shows: {val (beats/10s),
+// signed (diff mode carries a sharp/flat sign)} or null for "—". Set
+// only from real measurements; deliberately kept when a harmonic fades
+// out, so the last reading stays readable (cleared on a new note).
+let beatDisp = new Array(NUM_H).fill(null);
+let fastHist = Array.from({length:NUM_H}, ()=>[]); // per-frame "looks fast" flags over the last 1s (see FAST persistence)
 // Timeline view reuses the existing GAIN slider (spectroGain) for its
 // sensitivity, rather than a dedicated control — raising GAIN also
 // lowers the effective level needed for a harmonic to register as
@@ -1348,7 +1403,7 @@ function detectBeat(data, sr, hFreq, maxPlausibleSepHz) {
 // reporting a false beat rate in that case, we require the swing
 // between the most recent local max and local min to exceed
 // MIN_BEAT_SWING_DB before counting it as a genuine beat peak.
-const MIN_BEAT_SWING_DB = 4; // dB — minimum envelope peak-to-trough swing to count as a real beat
+const MIN_BEAT_SWING_DB = 2; // dB — minimum envelope peak-to-trough swing to count as a real beat. 2dB still catches two strings at a 1:0.2 level ratio (beat ±1.6dB); it was 4, which missed beats between unevenly loud strings. Safe against noise because envelopes below BEAT_MIN_SNR_DB are not tracked at all.
 // Level gate for STARTING envelope tracking on a harmonic. This used
 // to reuse SUSTAIN_ONSET_DB (-40dB), which was designed for the
 // OVERALL input level — as a per-harmonic gate it was far too strict:
@@ -1363,18 +1418,54 @@ function smoothedDb(env, idx, halfWin) {
   return sum/cnt;
 }
 
+// Amplitude (dB) of the component at `freq` within the newest
+// `winSec` of raw samples: a Hann-windowed single-frequency DFT
+// (complex demodulation) — see ENV_WIN_SEC for why this, not the FFT
+// bin, feeds the beat envelope. Only RELATIVE changes matter (swings
+// and peak timing), so the absolute scale needn't match the FFT's.
+const _hannCache = new Map(); // window length → {w: Float32Array, sum}
+function hannWindow(n) {
+  let e = _hannCache.get(n);
+  if (!e) {
+    const w = new Float32Array(n); let sum = 0;
+    for (let i = 0; i < n; i++) { w[i] = 0.5 - 0.5*Math.cos(2*Math.PI*i/(n-1)); sum += w[i]; }
+    e = { w, sum }; _hannCache.set(n, e);
+  }
+  return e;
+}
+function demodEnvelopeDb(samples, sr, freq, winSec) {
+  if (!samples || !freq) return -Infinity;
+  const n = Math.min(samples.length, Math.max(16, Math.round(winSec*sr)));
+  const start = samples.length - n;
+  const { w: win, sum: wSum } = hannWindow(n);
+  const w = 2*Math.PI*freq/sr;
+  // Phasor rotation instead of per-sample cos/sin calls.
+  const cw = Math.cos(w), sw = Math.sin(w);
+  let c = 1, s = 0, re = 0, im = 0;
+  for (let i = 0; i < n; i++) {
+    const v = samples[start+i]*win[i];
+    re += v*c; im -= v*s;
+    const c2 = c*cw - s*sw; s = c*sw + s*cw; c = c2;
+  }
+  const amp = 2*Math.hypot(re, im)/Math.max(1e-9, wSum);
+  return 20*Math.log10(Math.max(amp, 1e-9));
+}
+
 function detectEnvelopePeak(env, prevPeakTime, lastTroughDb) {
   const n = env.length;
-  const halfWin = 7; // ~15-sample smoothing window
+  const halfWin = ENV_SMOOTH_HALFWIN;
   if (n < halfWin*2+5) return null;
   const idx = n - halfWin - 2;
   const aS = smoothedDb(env, idx-1, halfWin);
   const bS = smoothedDb(env, idx,   halfWin);
   const cS = smoothedDb(env, idx+1, halfWin);
   if (bS >= aS && bS >= cS && bS > aS) {
-    // Require a genuine swing in amplitude (not just noise-level jitter)
-    // relative to the most recent local minimum we've seen.
-    if (lastTroughDb !== null && (bS - lastTroughDb) < MIN_BEAT_SWING_DB) {
+    // A beat peak must rise a genuine swing above a PRECEDING trough.
+    // With no trough seen yet this is the strike's own attack maximum
+    // (or the envelope just after tracking began), not a beat — it
+    // used to be counted, which is why every non-beating note read at
+    // least "1" right after being struck.
+    if (lastTroughDb === null || (bS - lastTroughDb) < MIN_BEAT_SWING_DB) {
       return null;
     }
     const peakTime = env[idx].t;
@@ -1385,11 +1476,33 @@ function detectEnvelopePeak(env, prevPeakTime, lastTroughDb) {
   return null;
 }
 
+// True when the last 0.5s of envelope is churning like a beat too fast
+// to count peak-by-peak (see FAST_BEAT_*). Works on frame-to-frame
+// changes with their mean removed, so a note's steady decay slope
+// doesn't count as wobble.
+function envLooksFastBeating(env, now) {
+  const recent = [];
+  for (let i=env.length-1; i>=0 && now-env[i].t<=500; i--) recent.push(env[i].db);
+  if (recent.length < 8) return false;
+  const d = [];
+  for (let i=1;i<recent.length;i++) d.push(recent[i]-recent[i-1]);
+  const md = d.reduce((a,v)=>a+v,0)/d.length;
+  let rough = 0, flips = 0, prev = 0;
+  for (const v of d) {
+    const x = v-md;
+    rough += Math.abs(x);
+    const sg = x>0?1:x<0?-1:0;
+    if (sg!==0 && prev!==0 && sg!==prev) flips++;
+    if (sg!==0) prev = sg;
+  }
+  return rough/d.length >= FAST_BEAT_ROUGH_DB && flips >= FAST_BEAT_MIN_FLIPS;
+}
+
 // Detects a local minimum in the smoothed envelope, used purely to
 // track the "floor" of the current swing for MIN_BEAT_SWING_DB checks.
 function detectEnvelopeTrough(env) {
   const n = env.length;
-  const halfWin = 7;
+  const halfWin = ENV_SMOOTH_HALFWIN;
   if (n < halfWin*2+5) return null;
   const idx = n - halfWin - 2;
   const aS = smoothedDb(env, idx-1, halfWin);
@@ -1537,8 +1650,45 @@ function renderLoop() {
     for (let k=0;k<NUM_H;k++) {
       beatHistory[k]=[]; beatRejectCount[k]=0; lastBeatRate[k]=null;
       ampEnv[k]=[]; lastPeakTime[k]=null; noteStartTime[k]=null; lastTroughDb[k]=null; beatPeakTimes[k]=[];
+      beatDisp[k]=null; statusVals[k]=0;
     }
   }
+  // Re-strike detection. Tuning means striking the SAME key over and
+  // over while turning the pin, so a fresh measurement must start on
+  // every strike — not only when the note name changes — or the peaks
+  // from before the pin moved get mixed into the new reading. A strike
+  // shows as the broadband level jumping RESTRIKE_JUMP_DB above its
+  // minimum over the last 300ms AND clearly above anything heard in
+  // the 2s before that. The second condition matters: late in a note's
+  // decay a deep, slow beat can itself swing 10dB, but its peaks are no
+  // louder than the previous beat peaks — a new hammer blow is.
+  // On a re-strike every tracked harmonic starts a new run and its card
+  // goes back to "—" until the new run has measured something, so a
+  // reading from before the pin was turned is never shown as current.
+  if (timeData) {
+    const nS = Math.min(timeData.length, Math.max(32, Math.round(0.03*sr)));
+    let acc = 0;
+    for (let i = timeData.length-nS; i < timeData.length; i++) acc += timeData[i]*timeData[i];
+    const bbDb = 10*Math.log10(acc/nS + 1e-20);
+    strikeLevelHist.push({t:now, db:bbDb});
+    while (strikeLevelHist.length && now - strikeLevelHist[0].t > 2000) strikeLevelHist.shift();
+    let minRecent = Infinity, maxEarlier = -Infinity;
+    for (let i = 0; i < strikeLevelHist.length-1; i++) {
+      const e = strikeLevelHist[i];
+      if (now - e.t <= 300) minRecent = Math.min(minRecent, e.db);
+      else maxEarlier = Math.max(maxEarlier, e.db);
+    }
+    if (bbDb - minRecent >= RESTRIKE_JUMP_DB && bbDb >= maxEarlier + RESTRIKE_ABOVE_PREV_DB && now - lastRestrikeT > 300) {
+      lastRestrikeT = now;
+      for (let k=0;k<NUM_H;k++) { noteStartTime[k] = null; beatDisp[k] = null; statusVals[k] = 0; }
+    }
+  }
+  if (lastBeatFrameT !== null) {
+    const dt = Math.max(5, Math.min(100, now - lastBeatFrameT));
+    beatFrameMsEma = beatFrameMsEma*0.95 + dt*0.05;
+  }
+  lastBeatFrameT = now;
+  const countableHz = countableBeatHz();
   // Reference beat spacing (Hz) measured on the fundamental, used below
   // to sanity-check diff-mode detections on higher harmonics — see
   // detectBeat's plausibility gate. Falls back to undefined (no gate)
@@ -1560,25 +1710,55 @@ function renderLoop() {
     if (h===0 && result && result.type==="diff") fundamentalSepHz = result.beat;
     const curDb = result ? result.db : -Infinity;
 
-    if (result && result.type==="diff") {
+    // Envelope sample for amplitude tracking: narrow-band demodulation
+    // of the raw samples at this harmonic (see ENV_WIN_SEC), plus the
+    // same measurement half-way to the next partial as a local noise
+    // reference. Below BEAT_MIN_SNR_DB the envelope's wobble is mostly
+    // noise, which would otherwise be counted as beats (or as "fast"),
+    // so such frames are treated like the harmonic being absent. The
+    // window is stretched for very low notes so it always spans a few
+    // periods of the fundamental.
+    let envDb = null, envSnr = -Infinity, envSnrOk = false;
+    if (result && result.type==="amp" && selH[h] && result.db >= AMP_TRACK_MIN_DB) {
+      const envWin = Math.max(ENV_WIN_SEC, currentFreq ? 3/currentFreq : 0);
+      envDb = demodEnvelopeDb(timeData, sr, hf, envWin);
+      if (isFinite(envDb)) {
+        const noiseDb = demodEnvelopeDb(timeData, sr, hf + (currentFreq ? currentFreq/2 : hf*0.05), envWin);
+        envSnr = envDb - noiseDb;
+        envSnrOk = envSnr >= BEAT_MIN_SNR_DB;
+      }
+    }
+
+    // Diff mode needs the partial to be properly audible too: as a
+    // harmonic decays into the noise floor, two noise bumps 20+Hz apart
+    // were being read as two strings (+200〜+300 readings on notes that
+    // weren't beating).
+    if (result && result.type==="diff" && result.db >= AMP_TRACK_MIN_DB) {
       // Two distinct peaks → direct frequency-difference beat rate
       beatNullCount[h]=0;
       pushBeatSample(h, result.signedBeat !== undefined ? result.signedBeat : result.beat);
       statusVals[h]=result.beat<0.08?2:result.beat<0.6?1:0;
+      // Two resolved peaks: their Hz gap IS the beat rate (beats/s), so
+      // ×10 gives beats/10s. Averaged over the smoothed history.
+      const hist=beatHistory[h];
+      if (hist.length) beatDisp[h] = { val: 10*hist.reduce((a,v)=>a+v,0)/hist.length, signed: true };
       // Reset envelope tracking since we're in diff mode now
       ampEnv[h]=[]; lastPeakTime[h]=null; noteStartTime[h]=null; ampNullCount[h]=0; lastTroughDb[h]=null; beatPeakTimes[h]=[];
-    } else if (result && result.type==="amp" && selH[h] && result.db >= AMP_TRACK_MIN_DB) {
+    } else if (envSnrOk) {
       // Single peak in frequency domain → this harmonic is "beating"
       // in amplitude over time. Track its envelope and measure the
       // time between successive envelope peaks directly.
       beatNullCount[h]=0;
       ampNullCount[h]=0;
       if (noteStartTime[h]===null) {
+        // Fresh tracking run (new strike, or this harmonic re-emerging
+        // after fading). The card keeps its previous reading until this
+        // run has measured something of its own.
         noteStartTime[h]=now;
-        beatHistory[h]=[];
+        ampEnv[h]=[]; lastPeakTime[h]=null; lastTroughDb[h]=null; beatPeakTimes[h]=[]; fastHist[h]=[];
       }
 
-      ampEnv[h].push({t:now, db:result.db});
+      ampEnv[h].push({t:now, db:envDb});
       while (ampEnv[h].length && now - ampEnv[h][0].t > ENV_KEEP_MS) ampEnv[h].shift();
 
       const trough = detectEnvelopeTrough(ampEnv[h]);
@@ -1586,35 +1766,52 @@ function renderLoop() {
 
       const peakT = detectEnvelopePeak(ampEnv[h], lastPeakTime[h], lastTroughDb[h]);
       if (peakT !== null) {
-        if (lastPeakTime[h] !== null) {
-          const periodMs = peakT - lastPeakTime[h];
-          if (periodMs > 0) {
-            const rate = 1000/periodMs;
-            lastBeatRate[h] = rate;
-            pushBeatSample(h, rate);
-            statusVals[h]=rate<1.5?2:rate<5?1:0;
-          }
-        }
         lastPeakTime[h] = peakT;
-        // Record this peak's timestamp for the beats/10s count — this
-        // is what makes the displayed figure a genuine 10-second
-        // measured count rather than an instantaneous-rate readout.
         beatPeakTimes[h].push(peakT);
         while (beatPeakTimes[h].length && peakT - beatPeakTimes[h][0] > BEAT_WINDOW_MS) beatPeakTimes[h].shift();
-      } else if (lastBeatRate[h] !== null) {
-        // No new peak yet this frame — keep showing the last measured rate
-        pushBeatSample(h, lastBeatRate[h]);
-      } else if (lastPeakTime[h] === null && noteStartTime[h] !== null) {
-        // No peak found yet at all since the note started (still waiting
-        // for the very first beat to complete). Per spec: estimate using
-        // elapsed time since note onset as a half-period, until either a
-        // real peak arrives or the note dies out.
-        const elapsedMs = now - noteStartTime[h];
-        if (elapsedMs > 30) {
-          const estPeriodMs = elapsedMs*2;
-          const estRate = 1000/estPeriodMs;
-          pushBeatSample(h, estRate);
-        }
+      }
+      // Reading: the MEASURED beat rate over (up to) the last 10s,
+      // expressed per 10s — (peaks−1) intervals over the time they
+      // span. Higher partials often ring for only 2-4s, so a literal
+      // 10-second tally undercounted them badly; normalising the
+      // measured intervals gives the same number a full 10s count
+      // would for a steady beat, without needing 10s of sound.
+      const pts = beatPeakTimes[h];
+      const elapsedMs = now - noteStartTime[h];
+      // FAST must persist: a slow beat between near-equal strings dips
+      // almost to silence at each null, and for that moment the dB
+      // envelope churns just like a fast beat. Real fast beating churns
+      // continuously, so require it in ≥80% of the last second's frames.
+      const fastNow = envSnr >= FAST_BEAT_MIN_SNR_DB && envLooksFastBeating(ampEnv[h], now);
+      fastHist[h].push({t:now, f:fastNow});
+      while (fastHist[h].length && now - fastHist[h][0].t > 1000) fastHist[h].shift();
+      const fastFrac = fastHist[h].filter(e=>e.f).length / fastHist[h].length;
+      const fast = elapsedMs >= BEAT_WARMUP_MS && fastHist[h].length >= 20 && fastFrac >= 0.8;
+      const rate = pts.length >= 2 ? (pts.length-1) / ((pts[pts.length-1]-pts[0])/1000) : null; // beats/s
+      if (rate !== null && (rate > countableHz || (fast && rate < 3))) {
+        // At the edge of what peak counting can resolve — or the
+        // envelope is churning fast while only a few stray peaks got
+        // counted (which reads as a falsely SLOW rate) — say FAST rather
+        // than print a number that is undercounted.
+        beatDisp[h] = { fast: true }; statusVals[h] = 0;
+      } else if (rate !== null) {
+        lastBeatRate[h] = rate;
+        beatDisp[h] = { val: rate*10, signed: false };
+        statusVals[h] = rate<1.5?2:rate<5?1:0;
+      } else if (fast) {
+        // Envelope is churning but no two peaks could be resolved:
+        // beating too fast to count — never report this as 0.
+        beatDisp[h] = { fast: true }; statusVals[h] = 0;
+      } else if (elapsedMs >= BEAT_WARMUP_MS) {
+        // Fewer than two beat peaks so far. A beat slower than the time
+        // we've listened can't have completed a cycle yet, so "0" can't
+        // be claimed — only an upper bound: with n (0 or 1) peaks in T
+        // seconds the rate is below about (n+1)/T. Shown as "<x" and
+        // tightening as the note sustains; once it drops to one beat
+        // per 10s or less it reads as a plain 0.
+        const bound = 10*(pts.length+1.5)/(elapsedMs/1000); // beats/10s (+0.5 margin: the first counted peak can take up to ~1.5 periods to arrive)
+        beatDisp[h] = bound <= 1 ? { val: 0, signed: false } : { upper: bound };
+        statusVals[h] = bound < 15 ? 2 : bound < 50 ? 1 : 0;
       }
     } else {
       // Nothing detected (silence / note has died out). Only the
@@ -1628,8 +1825,33 @@ function renderLoop() {
       beatNullCount[h]++;
       ampNullCount[h]++;
       if (beatNullCount[h]>BEAT_NULL_THRESH) {
-        statusVals[h]=0;
+        // statusVals is kept too, so the frozen reading keeps its colour.
         ampEnv[h]=[]; lastPeakTime[h]=null; lastBeatRate[h]=null; noteStartTime[h]=null; lastTroughDb[h]=null; beatPeakTimes[h]=[];
+      }
+    }
+  }
+  // Cross-harmonic consistency. Between two strings the beat rate grows
+  // roughly in proportion to harmonic number (H3 beats ~3x as fast as
+  // H1). So once a lower harmonic has a measured rate, a higher one
+  // whose predicted rate is beyond what can be counted must not read as
+  // "in tune" (a "<x" bound or 0) or as a much slower measured rate:
+  // partials ~20Hz+ apart fall outside both the envelope window and the
+  // two-peak search, and look perfectly steady — that showed as a green
+  // reading on a badly out-of-tune unison.
+  {
+    let refK = -1, refRate = 0;
+    for (let h=0;h<NUM_H;h++) {
+      const d = beatDisp[h];
+      if (selH[h] && d && !d.fast && !d.signed && d.upper===undefined && d.val >= 10) { refK = h; refRate = d.val/10; break; }
+    }
+    if (refK >= 0) {
+      for (let h=refK+1;h<NUM_H;h++) {
+        const d = beatDisp[h];
+        if (!selH[h] || !d || d.fast || d.signed) continue;
+        const predicted = refRate*(h+1)/(refK+1);
+        if (predicted <= countableHz) continue;
+        const tooLow = d.upper!==undefined || d.val/10 < 0.5*predicted;
+        if (tooLow) { beatDisp[h] = { fast: true }; statusVals[h] = 0; }
       }
     }
   }
@@ -1843,44 +2065,31 @@ function updateBeatDisplay() {
   for (let h=0;h<NUM_H;h++) {
     const on=selH[h], card=beatCards[h];
     const valEl=document.getElementById("bcv"+h);
-    const hist=beatHistory[h], st=statusVals[h];
     card.style.display=on?"block":"none";
     if (!on) continue;
     any=true;
-    const col=st===2?"#00ff55":st===1?"#ffdd00":"#ff8844";
+    // beats/10s figure, straight from beatDisp (see the detection
+    // loop): a measured rate normalised to 10s, 0 for a harmonic
+    // tracked with no beating, or "—" while nothing has been measured
+    // yet. Nothing estimated or extrapolated is ever shown — the old
+    // "elapsed time as half a period" guess used to leak in here and
+    // read as +30〜+45 on notes that weren't beating at all.
+    const d = beatDisp[h];
+    let text, st = statusVals[h];
+    if (!d) {
+      text = "—"; st = -1;
+    } else if (d.fast) {
+      text = FAST_BEAT_LABEL;
+    } else if (d.upper !== undefined) {
+      text = "<" + d.upper.toFixed(1);
+    } else if (d.signed) {
+      text = Math.abs(d.val)<0.05 ? "0.0" : (d.val>0?"+":"") + d.val.toFixed(1);
+    } else {
+      text = d.val.toFixed(1);
+    }
+    const col=st===2?"#00ff55":st===1?"#ffdd00":st===0?"#ff8844":"#ddd";
     card.style.borderColor=st===2?"#00cc44":st===1?"#cc9900":"#333";
     valEl.style.color=col;
-    // beats/10s figure. Two sources feed it, matching how the rate
-    // itself is measured (see the detection loop above):
-    //  - Slow/moderate beating (envelope-peak tracking, the normal
-    //    case for a real unison): beatPeakTimes holds the actual
-    //    timestamp of every envelope peak seen in the last
-    //    BEAT_WINDOW_MS (10s) — the displayed number is a literal
-    //    count of those, which is what was asked for: a real 10-second
-    //    tally instead of an instantaneous rate. The sign (sharp/flat)
-    //    is taken from the smoothed beatHistory average, since the
-    //    peak-time list itself is unsigned.
-    //  - diff mode (two resolved spectral peaks, used for fast/wide
-    //    separations where individual envelope peaks aren't tracked):
-    //    there's no peak-time list, so fall back to the smoothed
-    //    instantaneous rate × 10 — still expressed in the same
-    //    beats/10s unit for a consistent display, just derived
-    //    differently since the underlying measurement is continuous
-    //    rather than discrete peak events.
-    const times = beatPeakTimes[h];
-    while (times.length && now - times[0] > BEAT_WINDOW_MS) times.shift();
-    let text;
-    if (times.length > 0 || (hist.length && lastPeakTime[h]!==null)) {
-      const count = times.length;
-      const sign = hist.length ? (hist.reduce((a,v)=>a+v,0)/hist.length) : 0;
-      text = count===0 ? "0.0" : (sign<0?"-":"") + count.toFixed(1);
-    } else if (hist.length===0) {
-      text = "—";
-    } else {
-      const avg=hist.reduce((a,v)=>a+v,0)/hist.length;
-      const per10s = avg*10;
-      text = Math.abs(per10s)<0.05 ? "0.0" : (per10s>0?"+":"") + per10s.toFixed(1);
-    }
     valEl.textContent = text;
   }
   document.getElementById("beat-bar-empty").style.display=any?"none":"block";
@@ -2140,6 +2349,7 @@ function resetState() {
   ampEnv=Array.from({length:NUM_H},()=>[]); lastPeakTime=new Array(NUM_H).fill(null); lastBeatRate=new Array(NUM_H).fill(null); noteStartTime=new Array(NUM_H).fill(null); ampNullCount=new Array(NUM_H).fill(0);
   lastTroughDb=new Array(NUM_H).fill(null);
   beatPeakTimes=Array.from({length:NUM_H},()=>[]);
+  beatDisp=new Array(NUM_H).fill(null);
   resetSustainTimers();
   harmonicFreqRefined=new Array(NUM_H).fill(null);
   viewLo=logScale?10:0; viewHi=4000;
