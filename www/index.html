@@ -268,7 +268,7 @@ background: #0a0a0a; border-right: 1px solid #222; overflow: hidden;
     <div id="scale-toggle" style="width:36px;height:20px;border-radius:10px;background:#446622;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
       <div id="scale-knob" style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;"></div>
     </div>
-    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">16000 Hz</button>
+    <button id="sr-label" style="font-size:10px;color:#ccc;background:#1a1a2a;border:1px solid #334;border-radius:5px;padding:2px 6px;font-family:-apple-system,sans-serif;">8000 Hz</button>
   </div>
 </div>
 
@@ -372,7 +372,7 @@ const REF_PITCH_STEP    = 0.1;
 // ── Mutable state ──────────────────────────────────────────
 let micOn        = false;
 const SAMPLE_RATE_OPTIONS = [8000, 16000, 22050];
-let targetSampleRate = 16000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
+let targetSampleRate = 8000; // AudioContext sample rate is fixed at creation time, so changing this requires restarting the mic. Lower rates cap the analyzable range at sampleRate/2 (Nyquist) — e.g. 8000Hz means nothing above 4000Hz can be seen at all.
 let gainVal      = 5.0;
 let spectroGain  = 70;  // dB — brightness: shifts the whole color mapping up/down (higher = brighter overall). Shown in the UI as Brightness -20dB (see GAIN_UI_TO_INTERNAL_OFFSET below, which maps the 0〜-50dB slider onto this 10〜90 internal scale).
 let spectroRange = 96;  // dB — contrast: the dB span the color mapping is stretched across (lower = punchier/more contrasty, higher = smoother/flatter gradient)
