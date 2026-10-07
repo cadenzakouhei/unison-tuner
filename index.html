@@ -1904,6 +1904,51 @@ function renderLoop() {
 // widening/blur is applied; the genuinely coarse bin width IS the
 // band thickness, which is what keeps the noise floor's grain intact.
 
+// Low-register band thickness (Gaussian blend width, Hz) — see drawSpectroColumn.
+const LOW_BAND_SIGMA_HZ = 14;
+// Per-band saturation limiter. The strongest partials (on a piano,
+// usually H1/H2, often 20dB+ above the rest) drove the colour map past
+// its top end, so they painted as solid red lines and their beat dips
+// — still red, just slightly less loud — were invisible, while weaker
+// partials showed their beats as clear rounded grains. Each band's
+// typical level is tracked (a ~BAND_LIMIT_TAU_S running average of the
+// row levels, shared across ±BAND_LIMIT_SPREAD_CSS px so a whole band
+// moves together) and, ONLY where that level sits above BAND_LIMIT_T on
+// the colour ramp, the band is lowered until it sits there. A beat then
+// swings either side of it — peaks toward red, dips toward green/cyan —
+// exactly like the weaker partials. A running average (not a peak
+// hold) is used so the strike's brief attack burst doesn't dim the band
+// for seconds afterwards. Bands that weren't saturating, and the dark
+// background, are left exactly as before; brightness/contrast still work.
+const BAND_LIMIT_T = 0.62;      // colour-ramp position a loud band's typical level is brought to (yellow)
+const BAND_LIMIT_TAU_S = 1.2;   // averaging time — longer than a slow beat's half-period
+const BAND_LIMIT_SPREAD_CSS = 6;// half-width (css px) over which a band shares one level
+let bandAvg = new Float32Array(0), bandAvgSpread = new Float32Array(0), bandLimitLastT = 0;
+function applyBandLimiter(rowDb, H, dpr) {
+  if (bandAvg.length !== H) { bandAvg = Float32Array.from(rowDb); bandAvgSpread = new Float32Array(H); }
+  const now = performance.now();
+  const dt = bandLimitLastT ? Math.min(0.2, (now - bandLimitLastT)/1000) : 0;
+  bandLimitLastT = now;
+  const a = 1 - Math.exp(-dt/BAND_LIMIT_TAU_S);
+  for (let i=0;i<H;i++) {
+    const v = rowDb[i];
+    bandAvg[i] = isFinite(bandAvg[i]) ? bandAvg[i] + (v - bandAvg[i])*a : v;
+  }
+  const R = Math.max(1, Math.round(BAND_LIMIT_SPREAD_CSS*dpr));
+  for (let i=0;i<H;i++) {
+    let m = -200;
+    const lo = Math.max(0, i-R), hi = Math.min(H-1, i+R);
+    for (let k=lo;k<=hi;k++) if (bandAvg[k] > m) m = bandAvg[k];
+    bandAvgSpread[i] = m;
+  }
+  // dB at which dbToRGB reaches BAND_LIMIT_T (inverse of its mapping incl. gamma 1.8).
+  const dbAtLimit = spectroRange*Math.pow(BAND_LIMIT_T, 1/1.8) - spectroRange - spectroGain;
+  for (let i=0;i<H;i++) {
+    const excess = bandAvgSpread[i] - dbAtLimit;
+    if (excess > 0) rowDb[i] -= excess;
+  }
+}
+
 function drawSpectroColumn() {
   if (!offCanvas||!offCtx||!fftDataDisplay) return;
   const W=offCanvas.width, H=offCanvas.height;
@@ -1953,6 +1998,7 @@ function drawSpectroColumn() {
       const lowSrc = fftDataDisplayLowSmooth || fftDataDisplayLow;
       const sL=(b)=>(b>=0&&b<lowSrc.length)?lowSrc[b]:-120;
       let dbLraw = sL(bL0)+(sL(bL0+1)-sL(bL0))*frL;
+      let dbLrawUnwidened = dbLraw;
       // Thicken the low-register bands. The 2048-pt analyser resolves
       // bass partials so finely that H1/H2 rendered as hair-thin lines
       // only 1-2px tall, which the user found hard to read. Widen the
@@ -1978,8 +2024,14 @@ function drawSpectroColumn() {
       // there up to the crossover rendered hairline-thin again — the
       // visible mismatch between the "thick" low end and the thin H6.
       const widenFrac = 1 - Math.min(1, freq/DISPLAY_XOVER_HI_HZ);
-      const sigma = Math.max(0.35, 2.2*widenFrac); // smoothly shrinks to ~0.35 bins at the crossover, never hits 0
-      const widenBins = Math.max(1, Math.round(2.5*sigma)); // scan radius wide enough to cover the Gaussian's tail
+      // Blend width is set in Hz (not bins), so the low bands come out
+      // about as thick as the upper ones at every sample rate; capped at
+      // a fraction of the fundamental so neighbouring partials of very
+      // low notes (A0: 27.5Hz apart) don't smear into one another.
+      const sigmaHz = Math.min(LOW_BAND_SIGMA_HZ, 0.12*(currentFreq || 110));
+      const sigma = Math.max(0.35, sigmaHz/binSizeLow); // same width up to the crossover: at this width it matches the coarse analyser's own band width, so there's no seam to taper away
+      const widenBins = Math.min(12, Math.max(1, Math.round(2.5*sigma))); // scan radius covering the Gaussian's tail
+      dbLrawUnwidened = dbLraw;
       {
         const linCenter = Math.pow(10, dbLraw/10); // power domain for energy blending
         let wSum = 1, linSum = linCenter;
@@ -1999,11 +2051,11 @@ function drawSpectroColumn() {
       const dbLow = dbLraw - DISPLAY_FFT_LOW_NOISE_FLOOR_OFFSET;
       if (freq <= DISPLAY_XOVER_LO_HZ) {
         db = dbLow;
-        rawRow = dbLraw;
+        rawRow = dbLrawUnwidened;
       } else {
         const w = (freq - DISPLAY_XOVER_LO_HZ) / (DISPLAY_XOVER_HI_HZ - DISPLAY_XOVER_LO_HZ);
         db = dbLow*(1-w) + dbHigh*w;
-        rawRow = dbLraw*(1-w) + dbRaw*w;
+        rawRow = dbLrawUnwidened*(1-w) + dbRaw*w;
       }
     }
     // Right after the mic (re)starts — e.g. on a sample-rate change —
@@ -2013,7 +2065,10 @@ function drawSpectroColumn() {
     if (!isFinite(rawRow)) rawRow = -120;
     spectroRowDb[py] = db;
     spectroRowRaw[py] = rawRow;
-    const [r,g,b]=dbToRGB(db);
+  }
+  applyBandLimiter(spectroRowDb, H, dpr);
+  for (let py=0;py<H;py++) {
+    const [r,g,b]=dbToRGB(spectroRowDb[py]);
     for (let px=0;px<colW;px++) {
       const i=(py*colW+px)*4;
       d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=255;
